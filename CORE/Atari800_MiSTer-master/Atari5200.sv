@@ -1,0 +1,451 @@
+//============================================================================
+//  Atari 5200 replica
+// 
+//  Port to MiSTer
+//  Copyright (C) 2017-2019 Sorgelig
+//
+//  This program is free software; you can redistribute it and/or modify it
+//  under the terms of the GNU General Public License as published by the Free
+//  Software Foundation; either version 2 of the License, or (at your option)
+//  any later version.
+//
+//  This program is distributed in the hope that it will be useful, but WITHOUT
+//  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+//  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+//  more details.
+//
+//  You should have received a copy of the GNU General Public License along
+//  with this program; if not, write to the Free Software Foundation, Inc.,
+//  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+//============================================================================
+
+module emu
+(
+	`include "sys/emu_ports.vh"
+);
+
+assign ADC_BUS  = 'Z;
+assign USER_OUT = '1;
+assign {UART_RTS, UART_TXD, UART_DTR} = 0;
+assign {DDRAM_CLK, DDRAM_BURSTCNT, DDRAM_ADDR, DDRAM_DIN, DDRAM_BE, DDRAM_RD, DDRAM_WE} = '0;
+assign {SD_SCK, SD_MOSI, SD_CS} = 'Z;
+
+assign LED_USER  = file_download;
+assign LED_DISK  = 0;
+assign LED_POWER = 0;
+assign BUTTONS   = 0;
+assign VGA_SCALER= 0;
+assign VGA_DISABLE = 0;
+assign HDMI_FREEZE = 0;
+assign HDMI_BLACKOUT = 0;
+assign HDMI_BOB_DEINT = 0;
+
+wire [1:0] ar       = status[23:22];
+wire       vcrop_en = status[24];
+wire [3:0] vcopt    = status[28:25];
+reg        en216p;
+reg  [4:0] voff;
+always @(posedge CLK_VIDEO) begin
+	en216p <= ((HDMI_WIDTH == 1920) && (HDMI_HEIGHT == 1080) && !forced_scandoubler && !scale);
+	voff <= (vcopt < 6) ? {vcopt,1'b0} : ({vcopt,1'b0} - 5'd24);
+end
+
+wire vga_de;
+video_freak video_freak
+(
+	.*,
+	.VGA_DE_IN(vga_de),
+	.ARX((!ar) ? 12'd4 : (ar - 1'd1)),
+	.ARY((!ar) ? 12'd3 : 12'd0),
+	.CROP_SIZE((en216p & vcrop_en) ? 10'd216 : 10'd0),
+	.CROP_OFF(voff),
+	.SCALE(status[30:29])
+);
+
+wire [5:0] CPU_SPEEDS[8] ='{6'd1,6'd2,6'd4,6'd8,6'd16,6'd0,6'd0,6'd0};
+
+// Status Bit Map:
+//              Upper                          Lower
+// 0         1         2         3          4         5         6
+// 01234567890123456789012345678901 23456789012345678901234567890123
+// 0123456789ABCDEFGHIJKLMNOPQRSTUV 0123456789ABCDEFGHIJKLMNOPQRSTUV
+// X    XXXXX       XXX  XXXXXXXXXX   X     X              XX X     
+
+`include "build_id.v" 
+localparam CONF_STR = {
+	"ATARI5200;;",
+	"-;",
+	"F1,CARA52BINROM,Load Cart;",
+	"-;",
+	"O79,CPU Speed,1x,2x,4x,8x,16x;",
+	"-;",
+	"OMN,Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
+	"OHJ,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
+	"OV,NTSC artifacting,No,Yes;",
+	"d1oN,Artifacting colors,Set 1,Set 2;",
+	"d1oQ,Swap artif. colors,No,Yes;",
+	"-;",
+	"o2,Clip Sides,Off,On;",
+	"d0OO,Vertical Crop,Disabled,216p(5x);",
+	"d0OPS,Crop Offset,0,2,4,8,10,12,-12,-10,-8,-6,-4,-2;",
+	"OTU,Scale,Normal,V-Integer,Narrower HV-Integer,Wider HV-Integer;",
+	"-;",
+	"O5,Swap Joysticks 1&2,No,Yes;",
+	"oO,Mouse X,Normal,Inverted;",
+	"O6,Mouse Y,Normal,Inverted;",
+	"-;",
+	"r8,Cold Reset (F10);",
+  	"R0,Reset (Detach Carts);",
+	"J1,Fire 1,Fire 2,*,#,Start,Pause,Reset,0,1,2,3,4,5,6,7,8,9;",
+	"V,v",`BUILD_DATE
+};
+
+////////////////////   CLOCKS   ///////////////////
+
+wire locked;
+wire clk_sys;
+wire clk_mem;
+wire clk_vdo;
+
+pll pll
+(
+	.refclk(CLK_50M),
+	.rst(0),
+	.outclk_0(clk_sys),
+	.outclk_1(clk_mem),
+	.outclk_2(clk_vdo),
+	.locked(locked)
+);
+
+wire reset = RESET;
+
+//////////////////   HPS I/O   ///////////////////
+wire [20:0] joy_0;
+wire [20:0] joy_1;
+wire [20:0] joy_2;
+wire [20:0] joy_3;
+wire [15:0] joya_0;
+wire [15:0] joya_1;
+wire [15:0] joya_2;
+wire [15:0] joya_3;
+wire  [1:0] buttons;
+wire [63:0] status;
+wire [24:0] ps2_mouse;
+wire [10:0] ps2_key;
+wire        forced_scandoubler;
+wire [21:0] gamma_bus;
+
+wire  [7:0] ioctl_index;
+wire [26:0] ioctl_addr;
+wire  [7:0] ioctl_dout;
+wire        ioctl_download;
+reg         ioctl_wait = 1;
+wire        ioctl_wr;
+
+wire [35:0] EXT_BUS;
+wire  [7:0] cart_select;
+wire        set_reset;
+wire        set_pause;
+wire        sdram_ready;
+wire        dma_ready;
+reg         dma_req = 0;
+
+hps_io #(.CONF_STR(CONF_STR)) hps_io
+(
+	.clk_sys(clk_sys),
+	.HPS_BUS(HPS_BUS),
+
+	.joystick_0(joy_0),
+	.joystick_1(joy_1),
+	.joystick_2(joy_2),
+	.joystick_3(joy_3),
+	.joystick_l_analog_0(joya_0),
+	.joystick_l_analog_1(joya_1),
+	.joystick_l_analog_2(joya_2),
+	.joystick_l_analog_3(joya_3),
+
+	.buttons(buttons),
+	.status(status),
+	.status_menumask({status[31],en216p}),
+	.forced_scandoubler(forced_scandoubler),
+	.gamma_bus(gamma_bus),
+
+	.ps2_key(ps2_key),
+	.ps2_mouse(ps2_mouse),
+
+	.ioctl_index(ioctl_index),
+	.ioctl_addr(ioctl_addr),
+	.ioctl_dout(ioctl_dout),
+	.ioctl_download(ioctl_download),
+	.ioctl_wait(ioctl_wait),
+	.ioctl_wr(ioctl_wr),
+	
+	.EXT_BUS(EXT_BUS)
+);
+
+hps_ext hps_ext
+(
+	.clk_sys(clk_sys),
+	.EXT_BUS(EXT_BUS),
+
+	.set_reset(set_reset),
+	.set_pause(set_pause),
+	.cart1_select(cart_select),
+	.atari_status1(atari_status1),
+
+	.atari_status2(0),
+	.uart_data_read(0)
+);
+
+
+wire [7:0] R,G,B,Ro,Go,Bo;
+wire HBlank,VBlank,HBlank_o,VBlank_o;
+wire VSync, HSync, VSync_o, HSync_o;
+wire ce_pix;
+wire ce_pix_raw;
+
+assign CLK_VIDEO = clk_vdo;
+
+wire joy_d1ena = ~&joya_0;
+wire joy_d2ena = ~&joya_1;
+wire joy_d3ena = ~&joya_2;
+wire joy_d4ena = ~&joya_3;
+
+wire cpu_halt;
+
+wire [15:0] laudio, raudio;
+assign AUDIO_R = (cpu_halt | reset) ? 16'b0000000000000000 : raudio;
+assign AUDIO_L = (cpu_halt | reset) ? 16'b0000000000000000 : laudio;
+assign AUDIO_S = 1;
+assign AUDIO_MIX = 0;
+
+assign SDRAM_CKE = 1;
+
+atari5200top atari5200top
+(
+	.CLK(clk_sys),
+	.CLK_SDRAM(clk_mem),
+	.RESET_N(~reset),
+
+	.SDRAM_BA(SDRAM_BA),
+	.SDRAM_nRAS(SDRAM_nRAS),
+	.SDRAM_nCAS(SDRAM_nCAS),
+	.SDRAM_nWE(SDRAM_nWE),
+	.SDRAM_A(SDRAM_A),
+	.SDRAM_DQ(SDRAM_DQ),
+	.SDRAM_nCS(SDRAM_nCS),
+	.SDRAM_DQMH(SDRAM_DQMH),
+	.SDRAM_DQML(SDRAM_DQML),
+
+	.ROM_ADDR(rom_addr),
+	.ROM_DATA(rom_data),
+
+	.SDRAM_READY(sdram_ready),
+	.OSD_PAUSE(file_download),
+	.SET_RESET_IN(set_reset),
+	.SET_PAUSE_IN(set_pause),
+	.CART_SELECT_IN(cart_select),
+	.HOT_KEYS(atari_hotkeys),
+	.COLD_RESET_MENU(status[40] | buttons[1]),
+	.HPS_DMA_ADDR(ioctl_index == 0 ? {15'b100111000001000, ioctl_addr[10:0]} : ioctl_addr[25:0]),
+	.HPS_DMA_REQ(dma_req),
+	.HPS_DMA_DATA_OUT(ioctl_dout),
+	.HPS_DMA_READY(dma_ready),
+
+	.VGA_VS(VSync_o),
+	.VGA_HS(HSync_o),
+	.VGA_B(Bo),
+	.VGA_G(Go),
+	.VGA_R(Ro),
+	.VGA_PIXCE(ce_pix_raw),
+	.HBLANK(HBlank_o),
+	.VBLANK(VBlank_o),
+
+	.CPU_SPEED(CPU_SPEEDS[status[9:7]]),
+
+	.CLIP_SIDES(status[34]),
+	.AUDIO_L(laudio),
+	.AUDIO_R(raudio),
+
+	.CPU_HALT(cpu_halt),
+
+	.PS2_KEY(ps2_key),
+
+	.JOY1X(status[5] ? joya_1[7:0] : ax),
+	.JOY1Y(status[5] ? joya_1[15:8] : ay),
+	.JOY2X(status[5] ? ax : joya_1[7:0]),
+	.JOY2Y(status[5] ? ay : joya_1[15:8]),
+	.JOY3X(joya_2[7:0]),
+	.JOY3Y(joya_2[15:8]),
+	.JOY4X(joya_3[7:0]),
+	.JOY4Y(joya_3[15:8]),
+
+	.JOY1((status[5] ? joy_1 : j0) & {17'b11111111111111111, {4{joy_d1ena}}}),
+	.JOY2((status[5] ? j0 : joy_1) & {17'b11111111111111111, {4{joy_d2ena}}}),
+	.JOY3(joy_2 & {17'b11111111111111111, {4{joy_d3ena}}}),
+	.JOY4(joy_3 & {17'b11111111111111111, {4{joy_d4ena}}})
+);
+
+altddio_out
+#(
+	.extend_oe_disable("OFF"),
+	.intended_device_family("Cyclone V"),
+	.invert_output("OFF"),
+	.lpm_hint("UNUSED"),
+	.lpm_type("altddio_out"),
+	.oe_reg("UNREGISTERED"),
+	.power_up_high("OFF"),
+	.width(1)
+)
+sdramclk_ddr
+(
+	.datain_h(1'b0),
+	.datain_l(1'b1),
+	.outclock(clk_mem),
+	.dataout(SDRAM_CLK),
+	.aclr(1'b0),
+	.aset(1'b0),
+	.oe(1'b1),
+	.outclocken(1'b1),
+	.sclr(1'b0),
+	.sset(1'b0)
+);
+
+assign VGA_F1 = 0;
+assign VGA_SL = scale ? scale[1:0] - 1'd1 : 2'd0;
+
+wire [2:0] scale = status[19:17];
+
+reg ce_pix_raw_old = 0;
+assign ce_pix = ce_pix_raw & ~ce_pix_raw_old;
+
+always @(posedge CLK_VIDEO) begin
+	ce_pix_raw_old <= ce_pix_raw;
+end
+
+reg hsync_o, vsync_o;
+always @(posedge CLK_VIDEO) begin
+	if(ce_pix) begin
+		hsync_o <= HSync_o;
+		if(~hsync_o & HSync_o) vsync_o <= VSync_o;
+	end
+end
+
+articolor articolor
+(
+	.clk(CLK_VIDEO),
+	.ce_pix(ce_pix),
+	
+	.enable(status[31]),
+	.colorset(~status[55]),
+	.colorswap(status[58]),
+
+	.r_in(Ro),
+	.g_in(Go),
+	.b_in(Bo),
+	.hbl_in(HBlank_o),
+	.vbl_in(VBlank_o),
+	.hs_in(hsync_o),
+	.vs_in(vsync_o),
+
+	.r_out(R),
+	.g_out(G),
+	.b_out(B),
+	.hbl_out(HBlank),
+	.vbl_out(VBlank),
+	.hs_out(HSync),
+	.vs_out(VSync)
+);
+
+video_mixer #(.GAMMA(1)) video_mixer
+(
+	.*,
+	.scandoubler(scale || forced_scandoubler),
+	.hq2x(scale==1),
+	.freeze_sync(),
+	.VGA_DE(vga_de)
+);
+
+//////////////////   ROM   ///////////////////
+
+wire  [7:0] rom_data;
+wire [10:0] rom_addr;
+
+dpram #(11, 8, "rtl/rom/5200.mif") bios_5200
+(
+	.clock(clk_sys),
+
+	.address_a(ioctl_addr[10:0]),
+	.data_a(ioctl_dout),
+	.wren_a(ioctl_wr && (ioctl_index == 0)), // boot.rom download from the main
+
+	.address_b(rom_addr),
+	.q_b(rom_data)
+);
+
+//////////////////   IO   ///////////////////
+
+wire  [2:0] atari_hotkeys;
+wire file_download = ioctl_download && ioctl_index != 99;
+
+wire [15:0] atari_status1;
+assign atari_status1 = {13'b0000000000000, atari_hotkeys};
+
+always @(posedge clk_sys) begin
+
+	reg started = 0;
+
+	if(sdram_ready) begin
+		if(!started) begin
+			started <= 1;
+			ioctl_wait <= 0;
+		end
+		if(ioctl_index != 0 && ioctl_download) begin
+			if(dma_ready) begin
+				ioctl_wait <= 0;
+				dma_req <= 0;
+			end
+			if(ioctl_wr) begin
+				ioctl_wait <= 1;
+				dma_req <= 1;
+			end
+		end
+		else
+			ioctl_wait <= 0;
+	end
+end
+
+//////////////////   ANALOG AXIS   ///////////////////
+reg         emu = 0;
+wire  [7:0] ax = emu ? mx[7:0] : joya_0[7:0];
+wire  [7:0] ay = emu ? my[7:0] : joya_0[15:8];
+wire [20:0] j0 = emu ? {joy_0[20:6], ps2_mouse[1:0], joy_0[3:0]} : joy_0;
+
+reg  signed [8:0] mx = 0;
+wire signed [8:0] mdx = {ps2_mouse[4],ps2_mouse[4],ps2_mouse[15:9]};
+wire signed [8:0] mdx2 = (mdx > 10) ? 9'd10 : (mdx < -10) ? -8'd10 : mdx;
+wire signed [8:0] nmx = status[56] ? (mx - mdx2) : (mx + mdx2);
+
+reg  signed [8:0] my = 0;
+wire signed [8:0] mdy = {ps2_mouse[5],ps2_mouse[5],ps2_mouse[23:17]};
+wire signed [8:0] mdy2 = (mdy > 10) ? 9'd10 : (mdy < -10) ? -9'd10 : mdy;
+wire signed [8:0] nmy = status[6] ? (my - mdy2) : (my + mdy2);
+
+always @(posedge clk_sys) begin
+	reg old_stb = 0;
+	
+	old_stb <= ps2_mouse[24];
+	if(old_stb != ps2_mouse[24]) begin
+		emu <= 1;
+		mx <= (nmx < -128) ? -9'd128 : (nmx > 127) ? 9'd127 : nmx;
+		my <= (nmy < -128) ? -9'd128 : (nmy > 127) ? 9'd127 : nmy;
+	end
+
+	if(joya_0 || cpu_halt) begin
+		emu <= 0;
+		mx <= 0;
+		my <= 0;
+	end
+end
+
+endmodule
