@@ -114,8 +114,8 @@ signal atari_r             : std_logic_vector(7 downto 0);
 signal atari_g             : std_logic_vector(7 downto 0);
 signal atari_b             : std_logic_vector(7 downto 0);
 
-signal atari_hs            : std_logic;
 signal atari_vs            : std_logic;
+signal atari_hs            : std_logic;
 signal atari_hblank        : std_logic;
 signal atari_vblank        : std_logic;
 signal atari_pixce         : std_logic;
@@ -142,30 +142,55 @@ signal sio_irq             : std_logic;
 
 signal uart_data_read      : std_logic_vector(15 downto 0);
 
+signal cache_dirty         : std_logic_vector(G_VDNUM - 1 downto 0);
+signal prevent_reset       : std_logic;
+
+signal reset_core_n        : std_logic := '1';
+signal reset_core_int      : std_logic := '0';
+
 begin
 
-   video_ce_o       <= atari_pixce;
-   video_ce_ovl_o   <= atari_pixce;
-    
-   video_red_o      <= atari_r;
-   video_green_o    <= atari_g;
-   video_blue_o     <= atari_b;
-    
-   video_vs_o       <= atari_vs;
-   video_hs_o       <= atari_hs;
-   video_hblank_o   <= atari_hblank;
-   video_vblank_o   <= atari_vblank;
+   -- prevent data corruption by not allowing a soft reset to happen while the cache is still dirty
+   -- since we can have more than one cache that might be dirty, we convert the std_logic_vector of length G_VDNUM
+   -- into an unsigned and check for zero
+   --prevent_reset <= '0' when unsigned(cache_dirty) = 0 else
+   --                 '1';
+   prevent_reset <= '0'; -- force the reset for now until vdrives are connected properly
     
    audio_left_o     <= signed(atari_audio_l);
    audio_right_o    <= signed(atari_audio_r);
    
-   reset <= reset_soft_i or reset_hard_i;
+   
+   video_vs_o     <= atari_vs;
+   video_hs_o     <= atari_hs;
+   video_red_o    <= atari_r;
+   video_green_o  <= atari_g;
+   video_blue_o   <= atari_b;
+   video_ce_o     <= atari_pixce;
+
+   video_hblank_o <= atari_hblank;
+   video_vblank_o <= atari_vblank;
+
+   --------------------------------------------------------------------------------------------------
+   -- Hard reset
+   --------------------------------------------------------------------------------------------------
+
+   hard_reset_proc : process (clk_main_i)
+   begin
+      if rising_edge(clk_main_i) then
+         if reset_soft_i = '1' or reset_hard_i = '1' or reset_core_int = '1' then
+            reset_core_n <= prevent_reset and (not reset_hard_i);
+        else
+            reset_core_n <= '1';
+        end if;
+      end if;
+   end process hard_reset_proc;
    
    i_atari800top : entity work.atari800top
    port map (
       CLK                    => clk_main_i,
       CLK_SDRAM              => clk_mem_i,      -- if we retain this for now
-      RESET_N                => not reset,
+      RESET_N                => reset_core_n,
       ARESET                 => areset,
 
       -- SDRAM physical interface:
@@ -215,7 +240,7 @@ begin
       HPS_DMA_DATA_IN         => dma_data_in,
       HPS_DMA_READY           => dma_ready,
 
-      PAL                     => '0',
+      PAL                     => '1', -- PAL for now.
       CLIP_SIDES              => '0',
       --GTIA_XCOLOR             => '0', n/a
  
@@ -224,9 +249,7 @@ begin
       VGA_B                   => atari_b,
       VGA_G                   => atari_g,
       VGA_R                   => atari_r,
-      VGA_PIXCE               => atari_pixce,
-      VGA_BLANK               => open,
-      SIO_CLKOUT              => open,
+      VGA_PIXCE               => atari_pixce,     
 
       interlace_enable        => '0',
       interlace               => open,

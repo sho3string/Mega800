@@ -263,6 +263,25 @@ signal qnice_demo_vd_data_o   : std_logic_vector(15 downto 0);
 signal qnice_demo_vd_ce       : std_logic;
 signal qnice_demo_vd_we       : std_logic;
 
+signal main_video_red      : std_logic_vector(7 downto 0);
+signal main_video_green    : std_logic_vector(7 downto 0);
+signal main_video_blue     : std_logic_vector(7 downto 0);
+signal main_video_vs       : std_logic;
+signal main_video_hs       : std_logic;
+signal main_video_hblank   : std_logic;
+signal main_video_vblank   : std_logic;
+signal main_video_ce       : std_logic;
+signal ce_pix_raw_old      : std_logic := '0';
+signal ce_pix              : std_logic := '0';
+signal div                 : std_logic_vector(2 downto 0) := (others => '0');
+signal video_red           : std_logic_vector(7 downto 0);
+signal video_green         : std_logic_vector(7 downto 0);
+signal video_blue          : std_logic_vector(7 downto 0);
+signal video_vblank        : std_logic;
+signal video_hblank        : std_logic;
+signal video_vs            : std_logic;
+signal video_hs            : std_logic;
+
 begin
 
    hr_core_write_o      <= '0';
@@ -340,6 +359,15 @@ begin
    mem_rst_o   <= mem_rst;
    video_clk_o <= video_clk;
    video_rst_o <= video_rst;
+   
+   video_red_o      <= video_red;
+   video_green_o    <= video_green;
+   video_blue_o     <= video_blue;
+   video_vs_o       <= video_vs;
+   video_hs_o       <= video_hs;
+   video_hblank_o   <= video_hblank;
+   video_vblank_o   <= video_vblank;      
+
 
    ---------------------------------------------------------------------------------------------
    -- main_clk (MiSTer core's clock)
@@ -367,15 +395,15 @@ begin
 
          -- Video output
          -- This is PAL 720x576 @ 50 Hz (pixel clock 27 MHz), but synchronized to main_clk (54 MHz).
-         video_ce_o           => video_ce_o,
-         video_ce_ovl_o       => video_ce_ovl_o,
-         video_red_o          => video_red_o,
-         video_green_o        => video_green_o,
-         video_blue_o         => video_blue_o,
-         video_vs_o           => video_vs_o,
-         video_hs_o           => video_hs_o,
-         video_hblank_o       => video_hblank_o,
-         video_vblank_o       => video_vblank_o,
+         video_ce_o           => main_video_ce,
+         video_ce_ovl_o       => open,
+         video_red_o          => main_video_red,
+         video_green_o        => main_video_green,
+         video_blue_o         => main_video_blue,
+         video_vs_o           => main_video_vs,
+         video_hs_o           => main_video_hs,
+         video_hblank_o       => main_video_hblank,
+         video_vblank_o       => main_video_vblank,
 
          -- audio output (pcm format, signed values)
          audio_left_o         => main_audio_left_o,
@@ -404,6 +432,39 @@ begin
          pot2_y_i             => main_pot2_y_i
       ); -- i_main
 
+    -- Atari800	Resolution: 356x240	Horizontal: 15.7	Vertical:50.3	Pixel Clock: 7.16
+    
+    -- Equivalent to MiSTer:
+    -- assign ce_pix = ce_pix_raw & ~ce_pix_raw_old;
+    ce_pix <= main_video_ce and not ce_pix_raw_old;
+    video_ce_o <= ce_pix;
+    process(video_clk)
+    begin
+       if rising_edge(video_clk) then
+          
+          ce_pix_raw_old <= main_video_ce;
+          video_ce_ovl_o <= '0';
+          div <= std_logic_vector(unsigned(div) + 1);
+    
+          -- Keep the framework overlay domain at 28.636 MHz,
+          if div(0) = '1' then
+             video_ce_ovl_o <= '1';
+          end if;
+    
+          -- Resample the Atari core output into video_clk domain.
+          video_red    <= main_video_red;
+          video_green  <= main_video_green;
+          video_blue   <= main_video_blue;
+    
+          video_hs     <= main_video_hs;
+          video_vs     <= main_video_vs;
+          video_hblank <= main_video_hblank;
+          video_vblank <= main_video_vblank;
+    
+       end if;
+    end process;
+    
+    
    ---------------------------------------------------------------------------------------------
    -- Audio and video settings (QNICE clock domain)
    ---------------------------------------------------------------------------------------------
@@ -437,8 +498,8 @@ begin
    --    "Standard VGA":                     qnice_retro15kHz_o=0 and qnice_csync_o=0
    --    "Retro 15 kHz with HSync and VSync" qnice_retro15kHz_o=1 and qnice_csync_o=0
    --    "Retro 15 kHz with CSync"           qnice_retro15kHz_o=1 and qnice_csync_o=1
-   qnice_retro15kHz_o         <= '0';
-   qnice_csync_o              <= '0';
+   qnice_retro15kHz_o         <= '1';
+   qnice_csync_o              <= '1';
    qnice_osm_cfg_scaling_o    <= (others => '1');
 
    -- ascal filters that are applied while processing the input
@@ -469,21 +530,8 @@ begin
       qnice_dev_data_o     <= x"EEEE";
       qnice_dev_wait_o     <= '0';
 
-      -- Demo core specific: Delete before starting to port your core
-      qnice_demo_vd_ce     <= '0';
-      qnice_demo_vd_we     <= '0';
 
       case qnice_dev_id_i is
-
-         -- Demo core specific stuff: delete before porting your own core
-         when C_DEV_DEMO_VD =>
-            qnice_demo_vd_ce     <= qnice_dev_ce_i;
-            qnice_demo_vd_we     <= qnice_dev_we_i;
-            qnice_dev_data_o     <= qnice_demo_vd_data_o;
-
-         -- @TODO YOUR RAMs or ROMs (e.g. for cartridges) or other devices here
-         -- Device numbers need to be >= 0x0100
-
          when others => null;
       end case;
    end process core_specific_devices;
