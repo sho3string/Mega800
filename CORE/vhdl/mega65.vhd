@@ -104,8 +104,11 @@ port (
    clk_i                   : in  std_logic;              -- 100 MHz clock
 
    -- Share clock and reset with the framework
-   main_clk_o              : out std_logic;              -- CORE's 54 MHz clock
-   main_rst_o              : out std_logic;              -- CORE's reset, synchronized
+   main_clk_o              : out std_logic;           
+   main_rst_o              : out std_logic;
+   
+   mem_clk_o               : out std_logic;           
+   mem_rst_o               : out std_logic;
 
    -- M2M's reset manager provides 2 signals:
    --    m2m:   Reset the whole machine: Core and Framework
@@ -226,6 +229,10 @@ architecture synthesis of MEGA65_Core is
 
 signal main_clk               : std_logic;               -- Core main clock
 signal main_rst               : std_logic;
+signal mem_clk                : std_logic;
+signal mem_rst                : std_logic;
+signal video_clk              : std_logic;
+signal video_rst              : std_logic;
 
 ---------------------------------------------------------------------------------------------
 -- main_clk (MiSTer core's clock)
@@ -314,16 +321,25 @@ begin
    -- MMCME2_ADV clock generators:
    --   @TODO YOURCORE:       54 MHz
    clk_gen : entity work.clk
-      port map (
-         sys_clk_i         => clk_i,           -- expects 100 MHz
-         main_clk_o        => main_clk,        -- CORE's 54 MHz clock
-         main_rst_o        => main_rst         -- CORE's reset, synchronized
-      ); -- clk_gen
+   port map (
+      sys_clk_i  => clk_i,
+
+      main_clk_o => main_clk,
+      main_rst_o => main_rst,
+
+      mem_clk_o  => mem_clk,
+      mem_rst_o  => mem_rst,
+      
+      video_clk_o => video_clk,
+      video_rst_o => video_rst
+   );
 
    main_clk_o  <= main_clk;
    main_rst_o  <= main_rst;
-   video_clk_o <= main_clk;
-   video_rst_o <= main_rst;
+   mem_clk_o   <= mem_clk;
+   mem_rst_o   <= mem_rst;
+   video_clk_o <= video_clk;
+   video_rst_o <= video_rst;
 
    ---------------------------------------------------------------------------------------------
    -- main_clk (MiSTer core's clock)
@@ -341,6 +357,8 @@ begin
       )
       port map (
          clk_main_i           => main_clk,
+         clk_mem_i            => mem_clk,
+         clk_video_i          => video_clk,
          reset_soft_i         => main_reset_core_i,
          reset_hard_i         => main_reset_m2m_i,
          pause_i              => main_pause_core_i,

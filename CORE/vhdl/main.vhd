@@ -6,6 +6,37 @@
 -- MiSTer2MEGA65 done by sy2002 and MJoergen in 2022 and licensed under GPL v3
 ----------------------------------------------------------------------------------
 
+/*
+
+ Atari memory system
+                 ┌──────────────────────┐
+                 │                      │
+       CPU ─────►│                      │
+     ANTIC ─────►│   mapper / arbiter   │
+      VBXE ─────►│                      │
+      Cart ─────►│                      │
+                 └──────────┬───────────┘
+                            │
+                      Atari memory
+                         contract
+                            │
+                 ┌──────────▼───────────┐
+                 │ SDRAM compatibility  │
+                 │ / HyperRAM adapter   │
+                 │                      │
+                 │ BRAM cache/buffer    │
+                 │ request scheduling   │
+                 │ burst reads          │
+                 │ write buffering      │
+                 │ CDC                  │
+                 └──────────┬───────────┘
+                            │
+                    M2M HyperRAM API
+                            │
+                         8 MB
+
+*/
+
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -19,10 +50,13 @@ entity main is
    );
    port (
       clk_main_i              : in  std_logic;
+      clk_mem_i               : in  std_logic;
+      clk_video_i             : in  std_logic;
+    
       reset_soft_i            : in  std_logic;
       reset_hard_i            : in  std_logic;
       pause_i                 : in  std_logic;
-
+    
       -- MiSTer core main clock speed:
       -- Make sure you pass very exact numbers here, because they are used for avoiding clock drift at derived clocks
       clk_main_speed_i        : in  natural;
@@ -68,60 +102,196 @@ end entity main;
 
 architecture synthesis of main is
 
--- @TODO: Remove these demo core signals
+
 signal keyboard_n          : std_logic_vector(79 downto 0);
+signal reset               : std_logic;
+
+-- Atari 800 side signals
+signal areset              : std_logic;
+signal cpu_halt            : std_logic;
+
+signal atari_r             : std_logic_vector(7 downto 0);
+signal atari_g             : std_logic_vector(7 downto 0);
+signal atari_b             : std_logic_vector(7 downto 0);
+
+signal atari_hs            : std_logic;
+signal atari_vs            : std_logic;
+signal atari_hblank        : std_logic;
+signal atari_vblank        : std_logic;
+signal atari_pixce         : std_logic;
+
+signal atari_audio_l       : std_logic_vector(15 downto 0);
+signal atari_audio_r       : std_logic_vector(15 downto 0);
+
+signal sdram_ready         : std_logic;
+
+signal dma_data_in         : std_logic_vector(7 downto 0);
+signal dma_ready           : std_logic;
+
+signal tape_fifo_full      : std_logic;
+signal tape_fifo_empty     : std_logic;
+signal tape_active         : std_logic;
+
+signal sio_in              : std_logic;
+signal sio_out             : std_logic;
+signal sio_clkin           : std_logic;
+signal sio_cmd             : std_logic;
+signal sio_proc            : std_logic;
+signal sio_motor           : std_logic;
+signal sio_irq             : std_logic;
+
+signal uart_data_read      : std_logic_vector(15 downto 0);
 
 begin
 
-   -- @TODO: Add the actual MiSTer core here
-   -- The demo core's purpose is to show a test image and to make sure, that the MiSTer2MEGA65 framework
-   -- can be synthesized and run stand-alone without an actual MiSTer core being there, yet
-   i_democore : entity work.democore
-      port map (
-         clk_main_i           => clk_main_i,
+   video_ce_o       <= atari_pixce;
+   video_ce_ovl_o   <= atari_pixce;
+    
+   video_red_o      <= atari_r;
+   video_green_o    <= atari_g;
+   video_blue_o     <= atari_b;
+    
+   video_vs_o       <= atari_vs;
+   video_hs_o       <= atari_hs;
+   video_hblank_o   <= atari_hblank;
+   video_vblank_o   <= atari_vblank;
+    
+   audio_left_o     <= signed(atari_audio_l);
+   audio_right_o    <= signed(atari_audio_r);
+   
+   reset <= reset_soft_i or reset_hard_i;
+   
+   i_atari800top : entity work.atari800top
+   port map (
+      CLK                    => clk_main_i,
+      CLK_SDRAM              => clk_mem_i,      -- if we retain this for now
+      RESET_N                => not reset,
+      ARESET                 => areset,
 
-         reset_i              => reset_soft_i or reset_hard_i,       -- long and short press of reset button mean the same
-         pause_i              => pause_i,
+      -- SDRAM physical interface:
+      -- temporary signals initially,
+      -- replaced later by HyperRAM bridge
 
-         ball_col_rgb_i       => x"EE4020",                          -- ball color (RGB): orange
-         paddle_speed_i       => x"1",                               -- paddle speed is about 50 pixels / sec (due to 50 Hz)
+      TURBOFREEZER_ROM_LOADED => '0',
+      SDRAM_READY             => sdram_ready,
 
-         keyboard_n_i         => keyboard_n,                         -- move the paddle with the cursor left/right keys...
-         joy_up_n_i           => joy_1_up_n_i,                       -- ... or move the paddle with a joystick in port #1
-         joy_down_n_i         => joy_1_down_n_i,
-         joy_left_n_i         => joy_1_left_n_i,
-         joy_right_n_i        => joy_1_right_n_i,
-         joy_fire_n_i         => joy_1_fire_n_i,
+      OSD_PAUSE               => pause_i,
 
-         vga_ce_o             => video_ce_o,
-         vga_red_o            => video_red_o,
-         vga_green_o          => video_green_o,
-         vga_blue_o           => video_blue_o,
-         vga_vs_o             => video_vs_o,
-         vga_hs_o             => video_hs_o,
-         vga_hblank_o         => video_hblank_o,
-         vga_vblank_o         => video_vblank_o,
+      SET_RESET_IN            => '0',
+      SET_PAUSE_IN            => '0',
+      SET_FREEZER_IN          => '0',
+      SET_RESET_RNMI_IN       => '0',
+      SET_OPTION_FORCE_IN     => '0',
+      SET_START_FORCE_IN      => '0',
+      SET_SPACE_FORCE_IN      => '0',
 
-         audio_left_o         => audio_left_o,
-         audio_right_o        => audio_right_o
-      ); -- i_democore
+      CART1_SELECT_IN         => (others => '0'),
+      CART2_SELECT_IN         => (others => '0'),
 
-   -- On video_ce_o and video_ce_ovl_o: You have an important @TODO when porting a core:
-   -- video_ce_o: You need to make sure that video_ce_o divides clk_main_i such that it transforms clk_main_i
-   --             into the pixelclock of the core (means: the core's native output resolution pre-scandoubler)
-   -- video_ce_ovl_o: Clock enable for the OSM overlay and for sampling the core's (retro) output in a way that
-   --             it is displayed correctly on a "modern" analog input device: Make sure that video_ce_ovl_o
-   --             transforms clk_main_o into the post-scandoubler pixelclock that is valid for the target
-   --             resolution specified by VGA_DX/VGA_DY (globals.vhd)
-   -- video_retro15kHz_o: '1', if the output from the core (post-scandoubler) in the retro 15 kHz analog RGB mode.
-   --             Hint: Scandoubler off does not automatically mean retro 15 kHz on.
-   video_ce_ovl_o <= video_ce_o;
+      EMU_FLASH_REQUEST       => open,
+      EMU_FLASH_SLAVE         => open,
 
-   -- @TODO: Keyboard mapping and keyboard behavior
-   -- Each core is treating the keyboard in a different way: Some need low-active "matrices", some
-   -- might need small high-active keyboard memories, etc. This is why the MiSTer2MEGA65 framework
-   -- lets you define literally everything and only provides a minimal abstraction layer to the keyboard.
-   -- You need to adjust keyboard.vhd to your needs
+      HOT_KEYS                => open,
+
+      UART_ADDR               => (others => '0'),
+      UART_ENABLE             => '0',
+      UART_WR                 => '0',
+      UART_DATA_WRITE         => (others => '0'),
+      UART_DATA_READ          => uart_data_read,
+
+      TAPE_DATA               => (others => '0'),
+      TAPE_DATA_WR            => '0',
+      TAPE_FIFO_FULL          => tape_fifo_full,
+      TAPE_FIFO_EMPTY         => tape_fifo_empty,
+      TAPE_PWM_CONFIG         => "000",
+      TAPE_PWM_INVERT         => '0',
+      TAPE_RESET              => '0',
+      TAPE_ACTIVE             => tape_active,
+
+      HPS_DMA_ADDR            => (others => '0'),
+      HPS_DMA_REQ             => '0',
+      HPS_DMA_READ_ENABLE     => '0',
+      HPS_DMA_DATA_OUT        => (others => '0'),
+      HPS_DMA_DATA_IN         => dma_data_in,
+      HPS_DMA_READY           => dma_ready,
+
+      PAL                     => '0',
+      CLIP_SIDES              => '0',
+      --GTIA_XCOLOR             => '0', n/a
+ 
+      VGA_VS                  => atari_vs,
+      VGA_HS                  => atari_hs,
+      VGA_B                   => atari_b,
+      VGA_G                   => atari_g,
+      VGA_R                   => atari_r,
+      VGA_PIXCE               => atari_pixce,
+      VGA_BLANK               => open,
+      SIO_CLKOUT              => open,
+
+      interlace_enable        => '0',
+      interlace               => open,
+      interlace_field         => open,
+
+      HBLANK                  => atari_hblank,
+      VBLANK                  => atari_vblank,
+
+      -- CPU_SPEED             => 1x value,
+      -- RAM_SIZE              => 64K value,
+      cpu_speed               => "000001",
+      RAM_SIZE                => "000",
+
+      OS_MODE_800             => '0',
+      OS_800_16K              => '0',
+      PBI_MODE                => '0',
+      XEX_LOADER_MODE         => '0',
+
+      WARM_RESET_MENU         => '0',
+      COLD_RESET_MENU         => '0',
+
+      RTC                     => (others => '0'),
+
+      -- CLK_CONF              => fixed NTSC configuration,
+
+      VBXE_MODE               => (others => '0'),
+      VBXE_PALETTE_RGB        => (others => '0'),
+      VBXE_PALETTE_INDEX      => (others => '0'),
+      VBXE_PALETTE_COLOR      => (others => '0'),
+
+      POKEYMAX_CONFIG         => (others => '0'),
+
+      AUDIO_L                 => atari_audio_l,
+      AUDIO_R                 => atari_audio_r,
+
+      SIO_MODE                => '0',
+      SIO_IN                  => '1',
+      SIO_OUT                 => sio_out,
+      SIO_CLKIN               => '1',
+      SIO_CMD                 => sio_cmd,
+      SIO_PROC                => sio_proc,
+      SIO_MOTOR               => sio_motor,
+      SIO_IRQ                 => sio_irq,
+
+      CPU_HALT                => cpu_halt,
+
+      PS2_KEY                 => (others => '0'),
+
+      -- joysticks next
+      JOY1X                   => (others => '0'),
+      JOY1Y                   => (others => '0'),
+      JOY2X                   => (others => '0'),
+      JOY2Y                   => (others => '0'),
+      JOY3X                   => (others => '0'),
+      JOY3Y                   => (others => '0'),
+      JOY4X                   => (others => '0'),
+      JOY4Y                   => (others => '0'),
+
+      JOY1                    => (others => '0'),
+      JOY2                    => (others => '0'),
+      JOY3                    => (others => '0'),
+      JOY4                    => (others => '0')
+   );
+    
+   
    i_keyboard : entity work.keyboard
       port map (
          clk_main_i           => clk_main_i,

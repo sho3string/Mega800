@@ -40,8 +40,8 @@ constant QNICE_FIRMWARE           : string  := QNICE_FIRMWARE_M2M;
 -- then add all the clocks speeds here by adding more constants.
 ----------------------------------------------------------------------------------------------------------
 
--- @TODO: Your core's clock speed
-constant CORE_CLK_SPEED       : natural := 54_000_000;   -- @TODO YOURCORE expects 54 MHz
+-- Atari 800 core clock: 28.636364 MHz
+constant CORE_CLK_SPEED       : natural := 28_636_364;
 
 -- System clock speed (crystal that is driving the FPGA) and QNICE clock speed
 -- !!! Do not touch !!!
@@ -56,8 +56,15 @@ constant QNICE_CLK_SPEED      : natural := 50_000_000;   -- a change here has de
 --    VGA_*   size of the core's target output post scandoubler
 --    If in doubt, use twice the values found in this link:
 --    https://mister-devel.github.io/MkDocs_MiSTer/advanced/nativeres/#arcade-core-default-native-resolutions
-constant VGA_DX               : natural := 720;
-constant VGA_DY               : natural := 576;
+
+-- From https://mister-devel.github.io/MkDocs_MiSTer/advanced/nativeres/#computer-core-default-native-resolutions
+-- See Atari 800
+
+-- Atari800	Resolution: 356x240	Horizontal: 15.7	Vertical:50.3	Pixel Clock: 7.16
+constant VGA_DX               : natural := 712;
+constant VGA_DY               : natural := 480;
+
+
 
 --    FONT_*  size of one OSM character
 constant FONT_FILE            : string  := "../font/Anikki-16x16-m2m.rom";

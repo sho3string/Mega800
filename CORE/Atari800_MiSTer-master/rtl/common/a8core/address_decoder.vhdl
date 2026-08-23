@@ -351,8 +351,13 @@ ARCHITECTURE vhdl OF address_decoder IS
 	signal bank0next : std_logic_vector(1 downto 0);
 	signal bank1reg : std_logic_vector(1 downto 0);
 	signal bank1next : std_logic_vector(1 downto 0);
+	
+	-- Intermediate signal - make vivado happy
+	signal bank_next_inc : unsigned(4 downto 0);
 
 BEGIN
+    
+    bank_next_inc <= unsigned('0' & bank1next & bank0next) + 1;
 	-- register
 	process(clk,reset_n)
 	begin
@@ -1669,9 +1674,11 @@ end generate;
 						end if;
 						if bank0next(0) = '1' then
 							SDRAM_ADDR(15) <= not(addr_next(15));
-							SDRAM_ADDR(19 downto 16) <= std_logic_vector(unsigned('0' & bank1next & bank0next)+1)(4 downto 1);
+							--SDRAM_ADDR(19 downto 16) <= std_logic_vector(unsigned('0' & bank1next & bank0next)+1)(4 downto 1);
+							SDRAM_ADDR(19 downto 16) <= std_logic_vector(bank_next_inc(4 downto 1));
 							RAM_ADDR(15) <= not(addr_next(15));
-							RAM_ADDR(18 downto 16) <= std_logic_vector(unsigned('0' & bank1next & bank0next)+1)(3 downto 1);
+							--RAM_ADDR(18 downto 16) <= std_logic_vector(unsigned('0' & bank1next & bank0next)+1)(3 downto 1);
+							RAM_ADDR(18 downto 16) <= std_logic_vector(bank_next_inc(3 downto 1));
 						else
 							SDRAM_ADDR(19 downto 16) <= '0' & bank1next & bank0next(1);
 							RAM_ADDR(18 downto 16) <= bank1next & bank0next(1);

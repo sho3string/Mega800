@@ -57,7 +57,7 @@ signal pwm_act : std_logic;
 
 begin
 
-tape_transmit_fifo : work.fifo_tape
+tape_transmit_fifo : entity work.fifo_tape
 PORT MAP (clock => clk,data=>data_in(31 downto 0),rdreq=>fifo_req,wrreq=>wr_en,empty=>fifo_queue_empty,full=>fifo_full,q=>fifo_data,aclr=>fifo_reset);
 
 process(clk, reset_n)

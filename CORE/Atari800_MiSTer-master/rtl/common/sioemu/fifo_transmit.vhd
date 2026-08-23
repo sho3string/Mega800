@@ -33,7 +33,7 @@
 --authorized distributors.  Please refer to the applicable 
 --agreement for further details.
 
-
+/*
 LIBRARY ieee;
 USE ieee.std_logic_1164.all;
 
@@ -122,6 +122,7 @@ BEGIN
 
 
 END SYN;
+*/
 
 -- ============================================================
 -- CNX file retrieval info
@@ -191,3 +192,93 @@ END SYN;
 -- Retrieval info: GEN_FILE: TYPE_NORMAL fifo_transmit.bsf FALSE
 -- Retrieval info: GEN_FILE: TYPE_NORMAL fifo_transmit_inst.vhd FALSE
 -- Retrieval info: LIB_FILE: altera_mf
+
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+
+entity fifo_transmit is
+   port
+   (
+      clock : in  std_logic;
+      data  : in  std_logic_vector(7 downto 0);
+      rdreq : in  std_logic;
+      wrreq : in  std_logic;
+
+      empty : out std_logic;
+      full  : out std_logic;
+      q     : out std_logic_vector(7 downto 0);
+      usedw : out std_logic_vector(7 downto 0)
+   );
+end entity fifo_transmit;
+
+architecture rtl of fifo_transmit is
+
+   type ram_t is array (0 to 255) of std_logic_vector(7 downto 0);
+
+   signal ram       : ram_t;
+   signal rd_ptr    : unsigned(7 downto 0) := (others => '0');
+   signal wr_ptr    : unsigned(7 downto 0) := (others => '0');
+   signal count     : unsigned(8 downto 0) := (others => '0');
+
+   signal empty_int : std_logic;
+   signal full_int  : std_logic;
+   signal do_read   : std_logic;
+   signal do_write  : std_logic;
+
+begin
+
+   empty_int <= '1' when count = 0   else '0';
+   full_int  <= '1' when count = 256 else '0';
+
+   empty <= empty_int;
+   full  <= full_int;
+
+   usedw <= std_logic_vector(count(7 downto 0));
+
+   ---------------------------------------------------------------------------
+   -- Show-ahead output
+   --
+   -- Equivalent to Altera:
+   --    lpm_showahead => "ON"
+   ---------------------------------------------------------------------------
+
+   q <= ram(to_integer(rd_ptr));
+
+   ---------------------------------------------------------------------------
+   -- Effective read/write requests
+   ---------------------------------------------------------------------------
+
+   do_read <= rdreq and not empty_int;
+
+   -- Permit simultaneous read/write when full.
+   do_write <= wrreq and (not full_int or do_read);
+
+   ---------------------------------------------------------------------------
+   -- FIFO
+   ---------------------------------------------------------------------------
+
+   process(clock)
+    begin
+       if rising_edge(clock) then
+    
+          if do_write = '1' then
+             ram(to_integer(wr_ptr)) <= data;
+             wr_ptr <= wr_ptr + 1;
+          end if;
+    
+          if do_read = '1' then
+             rd_ptr <= rd_ptr + 1;
+          end if;
+    
+          if do_write = '1' and do_read = '0' then
+             count <= count + 1;
+    
+          elsif do_write = '0' and do_read = '1' then
+             count <= count - 1;
+          end if;
+    
+       end if;
+    end process;
+
+end architecture rtl;

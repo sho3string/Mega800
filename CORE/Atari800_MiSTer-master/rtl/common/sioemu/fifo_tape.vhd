@@ -1,4 +1,4 @@
-LIBRARY ieee;
+/*LIBRARY ieee;
 USE ieee.std_logic_1164.all;
 
 LIBRARY altera_mf;
@@ -84,3 +84,112 @@ BEGIN
 	);
 
 END SYN;
+*/
+
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+
+entity fifo_tape is
+   port
+   (
+      clock : in  std_logic;
+      data  : in  std_logic_vector(31 downto 0);
+      aclr  : in  std_logic;
+      rdreq : in  std_logic;
+      wrreq : in  std_logic;
+
+      empty : out std_logic;
+      full  : out std_logic;
+      q     : out std_logic_vector(31 downto 0);
+      usedw : out std_logic_vector(7 downto 0)
+   );
+end entity fifo_tape;
+
+architecture rtl of fifo_tape is
+
+   type ram_t is array (0 to 255) of std_logic_vector(31 downto 0);
+
+   signal ram       : ram_t;
+   signal rd_ptr    : unsigned(7 downto 0) := (others => '0');
+   signal wr_ptr    : unsigned(7 downto 0) := (others => '0');
+   signal count     : unsigned(8 downto 0) := (others => '0');
+
+   signal empty_int : std_logic;
+   signal full_int  : std_logic;
+   signal do_read   : std_logic;
+   signal do_write  : std_logic;
+
+begin
+
+   ---------------------------------------------------------------------------
+   -- Status
+   ---------------------------------------------------------------------------
+
+   empty_int <= '1' when count = 0   else '0';
+   full_int  <= '1' when count = 256 else '0';
+
+   empty <= empty_int;
+   full  <= full_int;
+
+   -- Original FIFO has an 8-bit usedw output.
+   usedw <= std_logic_vector(count(7 downto 0));
+
+   ---------------------------------------------------------------------------
+   -- Show-ahead output
+   --
+   -- Equivalent to Altera:
+   --    lpm_showahead => "ON"
+   ---------------------------------------------------------------------------
+
+   q <= ram(to_integer(rd_ptr));
+
+   ---------------------------------------------------------------------------
+   -- Effective operations
+   ---------------------------------------------------------------------------
+
+   do_read  <= rdreq and not empty_int;
+
+   -- Allow a write when full if a word is simultaneously being removed.
+   do_write <= wrreq and (not full_int or do_read);
+
+   ---------------------------------------------------------------------------
+   -- FIFO
+   ---------------------------------------------------------------------------
+
+   process(clock, aclr)
+   begin
+      if aclr = '1' then
+
+         rd_ptr <= (others => '0');
+         wr_ptr <= (others => '0');
+         count  <= (others => '0');
+
+      elsif rising_edge(clock) then
+
+         if do_write = '1' then
+            ram(to_integer(wr_ptr)) <= data;
+            wr_ptr <= wr_ptr + 1;
+         end if;
+
+         if do_read = '1' then
+            rd_ptr <= rd_ptr + 1;
+         end if;
+
+         case std_logic_vector'(do_write & do_read) is
+
+            when "10" =>
+               count <= count + 1;
+
+            when "01" =>
+               count <= count - 1;
+
+            when others =>
+               null;
+
+         end case;
+
+      end if;
+   end process;
+
+end architecture rtl;

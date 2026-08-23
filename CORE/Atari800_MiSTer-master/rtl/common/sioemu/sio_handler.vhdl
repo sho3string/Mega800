@@ -337,7 +337,7 @@ begin
 --	);
 
 
-transmit_fifo : work.fifo_transmit
+transmit_fifo : entity work.fifo_transmit
 	PORT MAP
 	(
 		clock		=> clk,

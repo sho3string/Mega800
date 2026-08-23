@@ -1,9 +1,17 @@
 -------------------------------------------------------------------------------------------------------------
--- MiSTer2MEGA65 Framework  
+-- MiSTer2MEGA65 Framework
 --
--- Clock Generator using the Xilinx specific MMCME2_ADV:
+-- Clock Generator using the Xilinx specific MMCME2_ADV
 --
---   @TODO YOURCORE expects 54 MHz
+-- Atari 800 clocks:
+--
+--   Input:     100.000000 MHz
+--
+--   VCO:      1260.000000 MHz
+--
+--   Main:       28.636364 MHz   (VCO / 44)
+--   Memory:    114.545455 MHz   (VCO / 11)
+--   Video:      57.272727 MHz   (VCO / 22)
 --
 -- MiSTer2MEGA65 done by sy2002 and MJoergen in 2022 and licensed under GPL v3
 -------------------------------------------------------------------------------------------------------------
@@ -19,29 +27,55 @@ use xpm.vcomponents.all;
 
 entity clk is
    port (
-      sys_clk_i       : in  std_logic;   -- expects 100 MHz
+      sys_clk_i       : in  std_logic;   -- 100 MHz
 
-      main_clk_o      : out std_logic;   -- main's @TODO 54 MHz main clock
-      main_rst_o      : out std_logic    -- main's reset, synchronized
+      main_clk_o      : out std_logic;   -- 28.636364 MHz
+      main_rst_o      : out std_logic;   -- reset synchronized to main clock
+      
+      mem_clk_o       : out std_logic;   -- 114.545455 MHz
+      mem_rst_o       : out std_logic;
+      
+      video_clk_o     : out std_logic;   -- 57.272727 MHz
+      video_rst_o     : out std_logic
+
    );
 end entity clk;
 
 architecture rtl of clk is
 
-signal clkfb1             : std_logic;
-signal clkfb1_mmcm        : std_logic;
-signal clkfb2             : std_logic;
-signal clkfb2_mmcm        : std_logic;
-signal clkfb3             : std_logic;
-signal clkfb3_mmcm        : std_logic;
-signal main_clk_mmcm      : std_logic;
+signal clkfb_mmcm          : std_logic;
+signal clkfb               : std_logic;
 
-signal main_locked        : std_logic;
+signal main_clk_mmcm       : std_logic;
+signal mem_clk_mmcm        : std_logic;
+signal video_clk_mmcm      : std_logic;
+
+signal main_locked         : std_logic;
 
 begin
 
    -------------------------------------------------------------------------------------
-   -- Generate QNICE and HyperRAM clock
+   -- Atari 800 clocks
+   --
+   -- Input        = 100 MHz
+   -- DIVCLK       = 5
+   -- MULT         = 63
+   --
+   -- VCO          = (100 / 5) * 63
+   --              = 1260 MHz
+   --
+   -- CLKOUT0      = 1260 / 44 = 28.6363636 MHz
+   -- CLKOUT1      = 1260 / 11 = 114.5454545 MHz
+   -- CLKOUT2      = 1260 / 22 = 57.2727273 MHz
+   
+   -- BOARD_CLK_SPEED  = 100,000,000 Hz
+   -- CORE_CLK_SPEED   =  28,636,364 Hz
+
+   -- MMCM VCO         = 1,260 MHz
+
+   -- main_clk_o       =  28.6363636 MHz
+   -- video_clk_o      =  57.2727273 MHz
+   -- mem_clk_o        = 114.5454545 MHz
    -------------------------------------------------------------------------------------
 
    i_clk_main : MMCME2_ADV
@@ -50,28 +84,57 @@ begin
          CLKOUT4_CASCADE      => FALSE,
          COMPENSATION         => "ZHOLD",
          STARTUP_WAIT         => FALSE,
-         CLKIN1_PERIOD        => 10.0,       -- INPUT @ 100 MHz
+
+         CLKIN1_PERIOD        => 10.000,       -- 100 MHz
          REF_JITTER1          => 0.010,
-         DIVCLK_DIVIDE        => 1,
-         CLKFBOUT_MULT_F      => 6.750,      -- 675 MHz
+
+         DIVCLK_DIVIDE        => 5,
+         CLKFBOUT_MULT_F      => 63.000,       -- 1260 MHz VCO
          CLKFBOUT_PHASE       => 0.000,
          CLKFBOUT_USE_FINE_PS => FALSE,
-         CLKOUT0_DIVIDE_F     => 12.500,     -- 54 MHz
+
+         -- 28.6363636 MHz
+         CLKOUT0_DIVIDE_F     => 44.000,
          CLKOUT0_PHASE        => 0.000,
          CLKOUT0_DUTY_CYCLE   => 0.500,
-         CLKOUT0_USE_FINE_PS  => FALSE
+         CLKOUT0_USE_FINE_PS  => FALSE,
+
+         -- 114.5454545 MHz
+         CLKOUT1_DIVIDE       => 11,
+         CLKOUT1_PHASE        => 0.000,
+         CLKOUT1_DUTY_CYCLE   => 0.500,
+         CLKOUT1_USE_FINE_PS  => FALSE,
+
+         -- 57.2727273 MHz
+         CLKOUT2_DIVIDE       => 22,
+         CLKOUT2_PHASE        => 0.000,
+         CLKOUT2_DUTY_CYCLE   => 0.500,
+         CLKOUT2_USE_FINE_PS  => FALSE
       )
       port map (
          -- Output clocks
-         CLKFBOUT            => clkfb3_mmcm,
+         CLKFBOUT            => clkfb_mmcm,
+
          CLKOUT0             => main_clk_mmcm,
+         CLKOUT1             => mem_clk_mmcm,
+         CLKOUT2             => video_clk_mmcm,
+
+         CLKOUT0B            => open,
+         CLKOUT1B            => open,
+         CLKOUT2B            => open,
+         CLKOUT3             => open,
+         CLKOUT3B            => open,
+         CLKOUT4             => open,
+         CLKOUT5             => open,
+         CLKOUT6             => open,
+
          -- Input clock control
-         CLKFBIN             => clkfb3,
+         CLKFBIN             => clkfb,
          CLKIN1              => sys_clk_i,
          CLKIN2              => '0',
-         -- Tied to always select the primary input clock
          CLKINSEL            => '1',
-         -- Ports for dynamic reconfiguration
+
+         -- Dynamic reconfiguration
          DADDR               => (others => '0'),
          DCLK                => '0',
          DEN                 => '0',
@@ -79,27 +142,29 @@ begin
          DO                  => open,
          DRDY                => open,
          DWE                 => '0',
-         -- Ports for dynamic phase shift
+
+         -- Dynamic phase shift
          PSCLK               => '0',
          PSEN                => '0',
          PSINCDEC            => '0',
          PSDONE              => open,
-         -- Other control and status signals
+
+         -- Status/control
          LOCKED              => main_locked,
          CLKINSTOPPED        => open,
          CLKFBSTOPPED        => open,
          PWRDWN              => '0',
          RST                 => '0'
-      ); -- i_clk_main
+      );
 
    -------------------------------------------------------------------------------------
    -- Output buffering
    -------------------------------------------------------------------------------------
 
-   clkfb3_bufg : BUFG
+   clkfb_bufg : BUFG
       port map (
-         I => clkfb3_mmcm,
-         O => clkfb3
+         I => clkfb_mmcm,
+         O => clkfb
       );
 
    main_clk_bufg : BUFG
@@ -108,9 +173,21 @@ begin
          O => main_clk_o
       );
 
-   -------------------------------------
+   mem_clk_bufg : BUFG
+      port map (
+         I => mem_clk_mmcm,
+         O => mem_clk_o
+      );
+
+   video_clk_bufg : BUFG
+      port map (
+         I => video_clk_mmcm,
+         O => video_clk_o
+      );
+
+   -------------------------------------------------------------------------------------
    -- Reset generation
-   -------------------------------------
+   -------------------------------------------------------------------------------------
 
    i_xpm_cdc_async_rst_main : xpm_cdc_async_rst
       generic map (
@@ -118,11 +195,31 @@ begin
          DEST_SYNC_FF    => 6
       )
       port map (
-         src_arst  => not main_locked,   -- 1-bit input: Source reset signal.
-         dest_clk  => main_clk_o,        -- 1-bit input: Destination clock.
-         dest_arst => main_rst_o         -- 1-bit output: src_rst synchronized to the destination clock domain.
-                                         -- This output is registered.
+         src_arst  => not main_locked,
+         dest_clk  => main_clk_o,
+         dest_arst => main_rst_o
       );
+      
+    i_xpm_cdc_async_rst_mem : xpm_cdc_async_rst
+       generic map (
+          RST_ACTIVE_HIGH => 1,
+          DEST_SYNC_FF    => 6
+       )
+       port map (
+          src_arst  => not main_locked,
+          dest_clk  => mem_clk_o,
+          dest_arst => mem_rst_o
+       );
+      
+    i_xpm_cdc_async_rst_video : xpm_cdc_async_rst
+       generic map (
+          RST_ACTIVE_HIGH => 1,
+          DEST_SYNC_FF    => 6
+       )
+       port map (
+          src_arst  => not main_locked,
+          dest_clk  => video_clk_o,
+          dest_arst => video_rst_o
+       );
 
 end architecture rtl;
-

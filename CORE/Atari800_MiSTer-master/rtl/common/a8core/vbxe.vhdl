@@ -371,7 +371,13 @@ signal coldetect_reg : std_logic_vector(7 downto 0);
 signal coldetect_next : std_logic_vector(7 downto 0);
 signal colclear : std_logic;
 
+-- Intermediate signal
+signal memac_page_diff : std_logic_vector(3 downto 0); 
+
 begin
+
+memac_page_diff <= std_logic_vector(unsigned(memac_address(15 downto 12)) -
+                   unsigned(memc_reg(7 downto 4)));
 
 process(gtia_pf0,gtia_pf1,gtia_pf2,gtia_pf3,gtia_highres,gtia_active_hr,gtia_prior,gtia_prior_raw,
 	enable,xdl_active_reg,xdl_map_live_reg,xdl_map_wd_reg,xdl_map_sindex_reg,xdl_map_buffer_data_out,
@@ -581,6 +587,7 @@ r_out <= data_color_r & '0';
 g_out <= data_color_g & '0';
 b_out <= data_color_b & '0';
 
+/*
 vbxe_vram_low_bits: entity work.spram
 generic map(addr_width => 19, data_width => 3, mem_depth => 8192)
 port map
@@ -590,8 +597,20 @@ port map
 	data => vram_data(2 downto 0),
 	wren => vram_wr_en_temp, 
 	q => vram_data_in_low
+);*/
+
+vbxe_vram_low_bits : entity work.dualport_2clk_ram
+generic map(ADDR_WIDTH => 19, DATA_WIDTH => 3)
+port map
+(
+	clock_a => clk,
+	address_a => vram_addr(18 downto 0),
+	data_a => vram_data(2 downto 0),
+	wren_a => vram_wr_en_temp, 
+	q_a => vram_data_in_low
 );
 
+/*
 vbxe_vram_high_bits: entity work.spram
 generic map(addr_width => 19, data_width => 5, mem_depth => 2048)
 port map
@@ -601,6 +620,18 @@ port map
 	data => vram_data(7 downto 3),
 	wren => vram_wr_en_temp, 
 	q => vram_data_in_high
+);
+*/
+
+vbxe_vram_high_bits : entity work.dualport_2clk_ram
+generic map(addr_width => 19, data_width => 5)
+port map
+(
+	clock_a => clk,
+	address_a => vram_addr(18 downto 0),
+	data_a => vram_data(7 downto 3),
+	wren_a => vram_wr_en_temp, 
+	q_a => vram_data_in_high
 );
 
 vram_data_in <= vram_data_in_high & vram_data_in_low;
@@ -704,6 +735,7 @@ cb_data_in <= VBXE_UPLOAD_PALETTE_COLOR when VBXE_UPLOAD_PALETTE_RGB(2) = '1' el
 
 color_index_out <= (palette_get_index & palette_get_color);
 
+/*
 colors0_r: entity work.dpram
 generic map(10,7,"rtl/vbxe/pal_r.mif")
 port map
@@ -714,8 +746,29 @@ port map
 	wren_a => cr_wren,
 	address_b => color_index_out,
 	q_b => data_color_r
+);*/
+
+colors0_r: entity work.dualport_2clk_ram
+generic map 
+(
+    ADDR_WIDTH   => 10,
+    DATA_WIDTH   => 7,
+    ROM_PRELOAD  => true,
+    ROM_FILE     => "../../CORE/Atari800_MiSTer-master/rtl/vbxe/pal_r.bin",
+    ROM_FILE_HEX => false
+)
+
+port map
+(
+	clock_a => clk,
+	address_a => color_index_in,
+	data_a => cr_data_in,
+	wren_a => cr_wren,
+	address_b => color_index_out,
+	q_b => data_color_r
 );
 
+/*
 colors0_g: entity work.dpram
 generic map(10,7,"rtl/vbxe/pal_g.mif")
 port map
@@ -727,12 +780,56 @@ port map
 	address_b => color_index_out,
 	q_b => data_color_g
 );
+*/
 
+colors0_g: entity work.dualport_2clk_ram
+generic map 
+(
+    ADDR_WIDTH   => 10,
+    DATA_WIDTH   => 7,
+    ROM_PRELOAD  => true,
+    ROM_FILE     => "../../CORE/Atari800_MiSTer-master/rtl/vbxe/pal_g.bin",
+    ROM_FILE_HEX => false
+)
+
+port map
+(
+	clock_a => clk,
+	address_a => color_index_in,
+	data_a => cg_data_in,
+	wren_a => cg_wren,
+	address_b => color_index_out,
+	q_b => data_color_g
+);
+
+
+/*
 colors0_b: entity work.dpram
 generic map(10,7,"rtl/vbxe/pal_b.mif")
 port map
 (
 	clock => clk,
+	address_a => color_index_in,
+	data_a => cb_data_in,
+	wren_a => cb_wren,
+	address_b => color_index_out,
+	q_b => data_color_b
+);
+*/
+
+colors0_b: entity work.dualport_2clk_ram
+generic map 
+(
+    ADDR_WIDTH   => 10,
+    DATA_WIDTH   => 7,
+    ROM_PRELOAD  => true,
+    ROM_FILE     => "../../CORE/Atari800_MiSTer-master/rtl/vbxe/pal_b.bin",
+    ROM_FILE_HEX => false
+)
+
+port map
+(
+	clock_a => clk,
 	address_a => color_index_in,
 	data_a => cb_data_in,
 	wren_a => cb_wren,
@@ -1317,7 +1414,7 @@ begin
 			if memac_check_next(0) = '1' then
 				vram_addr_next <= mems_reg(6 downto 0) & memac_address(11 downto 0);
 				case memc_reg(1 downto 0) is
-				when "00" =>
+				/*when "00" =>
 					null;
 				when "01" =>
 					vram_addr_next(12) <= std_logic_vector(unsigned(memac_address(15 downto 12)) - unsigned(memc_reg(7 downto 4)))(0);
@@ -1325,6 +1422,17 @@ begin
 					vram_addr_next(13 downto 12) <= std_logic_vector(unsigned(memac_address(15 downto 12)) - unsigned(memc_reg(7 downto 4)))(1 downto 0);
 				when "11" =>
 					vram_addr_next(14 downto 12) <= std_logic_vector(unsigned(memac_address(15 downto 12)) - unsigned(memc_reg(7 downto 4)))(2 downto 0);
+	            */
+	            when "00" =>
+					null;
+	            when "01" =>
+                   vram_addr_next(12) <= memac_page_diff(0);
+                
+                when "10" =>
+                    vram_addr_next(13 downto 12) <= memac_page_diff(1 downto 0);
+                
+                when "11" =>
+                   vram_addr_next(14 downto 12) <= memac_page_diff(2 downto 0);
 				end case;
 			else -- memac_check_b = '1'
 				vram_addr_next <= memb_reg(4 downto 0) & memac_address(13 downto 0);
@@ -1387,6 +1495,7 @@ begin
 			if memac_check_next(0) = '1' then
 				vram_addr_next <= mems_reg(6 downto 0) & memac_address(11 downto 0);
 				case memc_reg(1 downto 0) is
+				/*
 				when "00" =>
 					null;
 				when "01" =>
@@ -1395,6 +1504,17 @@ begin
 					vram_addr_next(13 downto 12) <= std_logic_vector(unsigned(memac_address(15 downto 12)) - unsigned(memc_reg(7 downto 4)))(1 downto 0);
 				when "11" =>
 					vram_addr_next(14 downto 12) <= std_logic_vector(unsigned(memac_address(15 downto 12)) - unsigned(memc_reg(7 downto 4)))(2 downto 0);
+				*/
+				when "00" =>
+					null;
+				when "01" =>
+                   vram_addr_next(12) <= memac_page_diff(0);
+                
+                when "10" =>
+                    vram_addr_next(13 downto 12) <= memac_page_diff(1 downto 0);
+                
+                when "11" =>
+                   vram_addr_next(14 downto 12) <= memac_page_diff(2 downto 0);
 				end case;
 			else -- memac_check_b = '1'
 				vram_addr_next <= memb_reg(4 downto 0) & memac_address(13 downto 0);
