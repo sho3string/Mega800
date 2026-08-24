@@ -56,6 +56,11 @@ entity main is
       reset_soft_i            : in  std_logic;
       reset_hard_i            : in  std_logic;
       pause_i                 : in  std_logic;
+      
+      atari_os_i              : in  std_logic_vector(1 downto 0);
+      
+      atari_osrom_addr_o      : out std_logic_vector(13 downto 0);
+      atari_osrom_data_i      : in  std_logic_vector(7 downto 0);
     
       -- MiSTer core main clock speed:
       -- Make sure you pass very exact numbers here, because they are used for avoiding clock drift at derived clocks
@@ -148,6 +153,7 @@ signal prevent_reset       : std_logic;
 signal reset_core_n        : std_logic := '1';
 signal reset_core_int      : std_logic := '0';
 
+
 begin
 
    -- prevent data corruption by not allowing a soft reset to happen while the cache is still dirty
@@ -170,6 +176,7 @@ begin
 
    video_hblank_o <= atari_hblank;
    video_vblank_o <= atari_vblank;
+   
 
    --------------------------------------------------------------------------------------------------
    -- Hard reset
@@ -192,6 +199,9 @@ begin
       CLK_SDRAM              => clk_mem_i,      -- if we retain this for now
       RESET_N                => reset_core_n,
       ARESET                 => areset,
+      
+      OSROM_ADDR             => atari_osrom_addr_o,
+      OSROM_DATA             => atari_osrom_data_i,
 
       -- SDRAM physical interface:
       -- temporary signals initially,

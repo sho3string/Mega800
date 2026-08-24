@@ -329,7 +329,7 @@ constant OPTM_S_SAVING     : string := "<Saving>";          -- the internal writ
 --             Do use a lower case \n. If you forget one of them or if you use upper case, you will run into undefined behavior.
 --          2. Start each line that contains an actual menu item (multi- or single-select) with a Space character,
 --             otherwise you will experience visual glitches.
-constant OPTM_SIZE         : natural := 35;  -- amount of items including empty lines:
+constant OPTM_SIZE         : natural := 45;  -- amount of items including empty lines:
                                              -- needs to be equal to the number of lines in OPTM_ITEMS and amount of items in OPTM_GROUPS
                                              -- IMPORTANT: If SAVE_SETTINGS is true and OPTM_SIZE changes: Make sure to re-generate and
                                              -- and re-distribute the config file. You can make a new one using M2M/tools/make_config.sh
@@ -337,7 +337,7 @@ constant OPTM_SIZE         : natural := 35;  -- amount of items including empty 
 -- Net size of the Options menu on the screen in characters (excluding the frame, which is hardcoded to two characters)
 -- Without submenus: Use OPTM_SIZE as height, otherwise count how large the actually visible main menu is.
 constant OPTM_DX           : natural := 23;
-constant OPTM_DY           : natural := 24;
+constant OPTM_DY           : natural := 26;
 
 constant OPTM_ITEMS        : string :=
 
@@ -377,6 +377,17 @@ constant OPTM_ITEMS        : string :=
    " HDMI: Zoom-in\n"       &
    " Audio improvements\n"  &
    "\n"                     &
+   
+   " System ROM: %s\n"      &
+   " Atari System ROM\n"    &
+   "\n"                     &
+   " XL/XE OS\n"            &
+   " 400/800 OS-A\n"        &
+   " 400/800 OS-B\n"        &
+   " Load Custom ROM:%s\n"  &
+   "\n"                     &
+   " Back to main menu\n"   &
+   "\n"                     &
    " Close Menu\n";
 
 -- define your own constants here and choose meaningful names
@@ -384,14 +395,16 @@ constant OPTM_ITEMS        : string :=
 -- and be aware that you can only have a maximum of 254 groups (255 means "Close Menu");
 -- also make sure that your group numbers are monotonic increasing (e.g. 1, 2, 3, 4, ...)
 -- single-select items and therefore also drive mount items need to have unique identifiers
-constant OPTM_G_Demo_A     : integer := 1;
-constant OPTM_G_HDMI       : integer := 2;
-constant OPTM_G_Drive_X    : integer := 3;
-constant OPTM_G_Drive_Y    : integer := 4;
-constant OPTM_G_Drive_Z    : integer := 5;
-constant OPTM_G_CRT        : integer := 6;
-constant OPTM_G_Zoom       : integer := 7;
-constant OPTM_G_Audio      : integer := 8;
+constant OPTM_G_Demo_A        : integer := 1;
+constant OPTM_G_HDMI          : integer := 2;
+constant OPTM_G_Drive_X       : integer := 3;
+constant OPTM_G_Drive_Y       : integer := 4;
+constant OPTM_G_Drive_Z       : integer := 5;
+constant OPTM_G_CRT           : integer := 6;
+constant OPTM_G_Zoom          : integer := 7;
+constant OPTM_G_Audio         : integer := 8;
+constant OPTM_G_SYSTEM_ROM    : integer := 9;
+constant OPTM_G_LOAD_ATARI_OS : integer := 10;
 
 -- !!! DO NOT TOUCH !!!
 type OPTM_GTYPE is array (0 to OPTM_SIZE - 1) of integer range 0 to 2**OPTM_GTC- 1;
@@ -436,6 +449,17 @@ constant OPTM_GROUPS       : OPTM_GTYPE := ( OPTM_G_TEXT + OPTM_G_HEADLINE,     
                                              OPTM_G_Zoom    + OPTM_G_SINGLESEL,        -- On/Off toggle ("Single Select")
                                              OPTM_G_Audio   + OPTM_G_SINGLESEL,        -- On/Off toggle ("Single Select")
                                              OPTM_G_LINE,                              -- Line
+                                             
+                                             OPTM_G_SUBMENU,
+                                             OPTM_G_HEADLINE,
+                                             OPTM_G_LINE,
+                                             OPTM_G_SYSTEM_ROM + OPTM_G_STDSEL,
+                                             OPTM_G_SYSTEM_ROM,
+                                             OPTM_G_SYSTEM_ROM,
+                                             OPTM_G_LOAD_ATARI_OS + OPTM_G_LOAD_ROM,
+                                             OPTM_G_LINE,
+                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,
+                                             OPTM_G_LINE,
                                              OPTM_G_CLOSE                              -- Close Menu
                                            );
 

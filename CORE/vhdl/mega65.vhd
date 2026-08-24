@@ -237,6 +237,7 @@ signal video_rst              : std_logic;
 ---------------------------------------------------------------------------------------------
 -- main_clk (MiSTer core's clock)
 ---------------------------------------------------------------------------------------------
+signal atari_os_rom           : std_logic_vector(1 downto 0);
 
 ---------------------------------------------------------------------------------------------
 -- qnice_clk
@@ -246,41 +247,47 @@ signal video_rst              : std_logic;
 -- Democore & example stuff: Delete before starting to port your own core
 ---------------------------------------------------------------------------------------------
 
--- Democore menu items
-constant C_MENU_HDMI_16_9_50   : natural := 12;
-constant C_MENU_HDMI_16_9_60   : natural := 13;
-constant C_MENU_HDMI_4_3_50    : natural := 14;
-constant C_MENU_HDMI_5_4_50    : natural := 15;
-constant C_MENU_HDMI_640_60    : natural := 16;
-constant C_MENU_HDMI_720_5994  : natural := 17;
-constant C_MENU_SVGA_800_60    : natural := 18;
-constant C_MENU_CRT_EMULATION  : natural := 30;
-constant C_MENU_HDMI_ZOOM      : natural := 31;
-constant C_MENU_IMPROVE_AUDIO  : natural := 32;
+
 
 -- QNICE clock domain
-signal qnice_demo_vd_data_o   : std_logic_vector(15 downto 0);
-signal qnice_demo_vd_ce       : std_logic;
-signal qnice_demo_vd_we       : std_logic;
+signal qnice_demo_vd_data_o    : std_logic_vector(15 downto 0);
+signal qnice_demo_vd_ce        : std_logic;
+signal qnice_demo_vd_we        : std_logic;
 
-signal main_video_red      : std_logic_vector(7 downto 0);
-signal main_video_green    : std_logic_vector(7 downto 0);
-signal main_video_blue     : std_logic_vector(7 downto 0);
-signal main_video_vs       : std_logic;
-signal main_video_hs       : std_logic;
-signal main_video_hblank   : std_logic;
-signal main_video_vblank   : std_logic;
-signal main_video_ce       : std_logic;
-signal ce_pix_raw_old      : std_logic := '0';
-signal ce_pix              : std_logic := '0';
-signal div                 : std_logic_vector(2 downto 0) := (others => '0');
-signal video_red           : std_logic_vector(7 downto 0);
-signal video_green         : std_logic_vector(7 downto 0);
-signal video_blue          : std_logic_vector(7 downto 0);
-signal video_vblank        : std_logic;
-signal video_hblank        : std_logic;
-signal video_vs            : std_logic;
-signal video_hs            : std_logic;
+signal main_video_red          : std_logic_vector(7 downto 0);
+signal main_video_green        : std_logic_vector(7 downto 0);
+signal main_video_blue         : std_logic_vector(7 downto 0);
+signal main_video_vs           : std_logic;
+signal main_video_hs           : std_logic;
+signal main_video_hblank       : std_logic;
+signal main_video_vblank       : std_logic;
+signal main_video_ce           : std_logic;
+signal ce_pix_raw_old          : std_logic := '0';
+signal ce_pix                  : std_logic := '0';
+signal div                     : std_logic_vector(2 downto 0) := (others => '0');
+signal video_red               : std_logic_vector(7 downto 0);
+signal video_green             : std_logic_vector(7 downto 0);
+signal video_blue              : std_logic_vector(7 downto 0);
+signal video_vblank            : std_logic;
+signal video_hblank            : std_logic;
+signal video_vs                : std_logic;
+signal video_hs                : std_logic;
+
+signal qnice_osrom_we          : std_logic;
+signal qnice_osrom_addr        : std_logic_vector(13 downto 0);
+signal qnice_osrom_data_to     : std_logic_vector(7 downto 0);
+signal qnice_osrom_data_from   : std_logic_vector(7 downto 0);
+
+signal qnice_basicrom_we       : std_logic;
+signal qnice_basicrom_addr     : std_logic_vector(12 downto 0);
+signal qnice_basicrom_data_to  : std_logic_vector(7 downto 0);
+signal qnice_basicrom_data_from: std_logic_vector(7 downto 0);
+
+signal atari_osrom_addr        : std_logic_vector(13 downto 0);
+signal atari_osrom_data        : std_logic_vector(7 downto 0);
+
+signal main_osrom_addr         : std_logic_vector(13 downto 0);
+signal main_osrom_data         : std_logic_vector(7 downto 0);
 
 begin
 
@@ -353,12 +360,12 @@ begin
       video_rst_o => video_rst
    );
 
-   main_clk_o  <= main_clk;
-   main_rst_o  <= main_rst;
-   mem_clk_o   <= mem_clk;
-   mem_rst_o   <= mem_rst;
-   video_clk_o <= video_clk;
-   video_rst_o <= video_rst;
+   main_clk_o       <= main_clk;
+   main_rst_o       <= main_rst;
+   mem_clk_o        <= mem_clk;
+   mem_rst_o        <= mem_rst;
+   video_clk_o      <= video_clk;
+   video_rst_o      <= video_rst;
    
    video_red_o      <= video_red;
    video_green_o    <= video_green;
@@ -391,6 +398,11 @@ begin
          reset_hard_i         => main_reset_m2m_i,
          pause_i              => main_pause_core_i,
 
+         atari_os_i           => atari_os_rom,
+         
+         atari_osrom_addr_o   => main_osrom_addr,
+         atari_osrom_data_i   => main_osrom_data,
+         
          clk_main_speed_i     => CORE_CLK_SPEED,
 
          -- Video output
@@ -431,9 +443,13 @@ begin
          pot2_x_i             => main_pot2_x_i,
          pot2_y_i             => main_pot2_y_i
       ); -- i_main
+      
+    atari_os_rom <= "00" when main_osm_control_i(C_MENU_OS_XLXE) else
+                 "01" when main_osm_control_i(C_MENU_OS_OSA) else
+                 "10" when main_osm_control_i(C_MENU_OS_OSB) else
+                 "00";
 
     -- Atari800	Resolution: 356x240	Horizontal: 15.7	Vertical:50.3	Pixel Clock: 7.16
-    
     -- Equivalent to MiSTer:
     -- assign ce_pix = ce_pix_raw & ~ce_pix_raw_old;
     ce_pix <= main_video_ce and not ce_pix_raw_old;
@@ -525,16 +541,50 @@ begin
    ---------------------------------------------------------------------------------------------
 
    core_specific_devices : process(all)
-   begin
-      -- make sure that this is x"EEEE" by default and avoid a register here by having this default value
-      qnice_dev_data_o     <= x"EEEE";
-      qnice_dev_wait_o     <= '0';
-
-
-      case qnice_dev_id_i is
-         when others => null;
-      end case;
-   end process core_specific_devices;
+    begin
+       qnice_dev_data_o   <= x"EEEE";
+       qnice_dev_wait_o   <= '0';
+    
+       qnice_osrom_we      <= '0';
+       qnice_osrom_addr    <= qnice_dev_addr_i(13 downto 0);
+       qnice_osrom_data_to <= qnice_dev_data_i(7 downto 0);
+    
+       case qnice_dev_id_i is
+    
+          when C_DEV_ATARI_OSROM =>
+             qnice_osrom_addr    <= qnice_dev_addr_i(13 downto 0);
+             qnice_osrom_we      <= qnice_dev_we_i;
+             qnice_dev_data_o    <= x"00" & qnice_osrom_data_from;
+             qnice_osrom_data_to <= qnice_dev_data_i(7 downto 0);
+    
+          when others =>
+             null;
+    
+       end case;
+    end process core_specific_devices;
+    
+    atari_osrom : entity work.dualport_2clk_ram
+       generic map (
+          ADDR_WIDTH => 14,
+          DATA_WIDTH => 8,
+          FALLING_A  => false,
+          FALLING_B  => true
+       )
+       port map (
+          -- Atari core side
+          clock_a    => main_clk,
+          address_a  => main_osrom_addr,
+          data_a     => (others => '0'),
+          wren_a     => '0',
+          q_a        => main_osrom_data,
+    
+          -- QNICE loader side
+          clock_b    => qnice_clk_i,
+          address_b  => qnice_osrom_addr,
+          data_b     => qnice_osrom_data_to,
+          wren_b     => qnice_osrom_we,
+          q_b        => qnice_osrom_data_from
+   );
 
    ---------------------------------------------------------------------------------------------
    -- Dual Clocks

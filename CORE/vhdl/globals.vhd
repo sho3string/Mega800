@@ -16,6 +16,22 @@ use work.video_modes_pkg.all;
 
 package globals is
 
+-- Menu items
+constant C_MENU_HDMI_16_9_50   : natural := 12;
+constant C_MENU_HDMI_16_9_60   : natural := 13;
+constant C_MENU_HDMI_4_3_50    : natural := 14;
+constant C_MENU_HDMI_5_4_50    : natural := 15;
+constant C_MENU_HDMI_640_60    : natural := 16;
+constant C_MENU_HDMI_720_5994  : natural := 17;
+constant C_MENU_SVGA_800_60    : natural := 18;
+constant C_MENU_CRT_EMULATION  : natural := 30;
+constant C_MENU_HDMI_ZOOM      : natural := 31;
+constant C_MENU_IMPROVE_AUDIO  : natural := 32;
+constant C_MENU_OS_XLXE        : natural := 37;
+constant C_MENU_OS_OSA         : natural := 38;
+constant C_MENU_OS_OSB         : natural := 39;
+constant C_MENU_OS_CUSTOM      : natural := 40;
+
 ----------------------------------------------------------------------------------------------------------
 -- QNICE Firmware
 ----------------------------------------------------------------------------------------------------------
@@ -91,6 +107,7 @@ constant C_HMAP_DEMO          : std_logic_vector(15 downto 0) := x"0200";     --
 -- example virtual drive handler, which is connected to nothing and only here to demo
 -- the file- and directory browsing capabilities of the firmware
 constant C_DEV_DEMO_VD        : std_logic_vector(15 downto 0) := x"0101";
+constant C_DEV_ATARI_OSROM    : std_logic_vector(15 downto 0) := x"0102";
 constant C_DEV_DEMO_NOBUFFER  : std_logic_vector(15 downto 0) := x"AAAA";
 
 -- Virtual drive management system (handled by vdrives.vhd and the firmware)
@@ -136,8 +153,8 @@ constant C_CRTROMTYPE_OPTIONAL   : std_logic_vector(15 downto 0) := x"0004";
 --       else it is a 4k window in HyperRAM or in SDRAM
 -- In case we are loading to a QNICE device, then the control and status register is located at the 4k window 0xFFFF.
 -- @TODO: See @TODO for more details about the control and status register
-constant C_CRTROMS_MAN_NUM       : natural := 0;                                       -- amount of manually loadable ROMs and carts; maximum is 16
-constant C_CRTROMS_MAN           : crtrom_buf_array := ( x"EEEE", x"EEEE",
+constant C_CRTROMS_MAN_NUM       : natural := 1;                                       -- amount of manually loadable ROMs and carts; maximum is 16
+constant C_CRTROMS_MAN           : crtrom_buf_array := ( C_CRTROMTYPE_DEVICE,C_DEV_ATARI_OSROM,
                                                          x"EEEE");                     -- Always finish the array using x"EEEE"
 
 -- Automatically loaded ROMs: These ROMs are loaded before the core starts
@@ -158,11 +175,14 @@ constant C_CRTROMS_MAN           : crtrom_buf_array := ( x"EEEE", x"EEEE",
 --               b) Don't forget to zero-terminate each of your substrings of C_CRTROMS_AUTO_NAMES by adding "& ENDSTR;"
 --               c) Don't forget to finish the C_CRTROMS_AUTO array with x"EEEE"
 
+-- Atari core specific ROMs
+constant ATARI_OS_ROM           : string := "/atari800/a8diag1-6.rom" & ENDSTR;
+constant ATARI_OS_ROM_START     : std_logic_vector(15 downto 0) := x"0000";
+
 -- M2M framework constants
-constant C_CRTROMS_AUTO_NUM      : natural := 0;                                       -- Amount of automatically loadable ROMs and carts, maximum is 16
-constant C_CRTROMS_AUTO_NAMES    : string  := "" & ENDSTR;
-constant C_CRTROMS_AUTO          : crtrom_buf_array := ( x"EEEE", x"EEEE", x"EEEE", x"EEEE",
-                                                         x"EEEE");                     -- Always finish the array using x"EEEE"
+constant C_CRTROMS_AUTO_NUM     : natural := 1;                                       -- Amount of automatically loadable ROMs and carts, maximum is 16
+constant C_CRTROMS_AUTO_NAMES   : string := ATARI_OS_ROM;
+constant C_CRTROMS_AUTO         : crtrom_buf_array := ( C_CRTROMTYPE_DEVICE,C_DEV_ATARI_OSROM,C_CRTROMTYPE_OPTIONAL,ATARI_OS_ROM_START, x"EEEE");
 
 ----------------------------------------------------------------------------------------------------------
 -- Audio filters

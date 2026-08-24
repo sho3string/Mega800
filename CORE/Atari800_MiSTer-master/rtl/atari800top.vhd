@@ -92,6 +92,9 @@ PORT
 
 	PS2_KEY    : IN  STD_LOGIC_VECTOR(10 downto 0);
 
+    OSROM_ADDR : OUT STD_LOGIC_VECTOR(13 DOWNTO 0);
+    OSROM_DATA : IN  STD_LOGIC_VECTOR(7 DOWNTO 0);
+    
 	CPU_SPEED  : IN  STD_LOGIC_VECTOR(5 downto 0);
 	RAM_SIZE   : IN  STD_LOGIC_VECTOR(2 downto 0);
 	OS_MODE_800   : IN  STD_LOGIC;
@@ -364,7 +367,7 @@ GENERIC MAP
 	video_bits => 8,
 	palette => 1,
 	internal_rom => 0,
-	internal_ram => 0
+	internal_ram => 65536
 )
 PORT MAP
 (
@@ -382,6 +385,9 @@ PORT MAP
 	interlace_enable => interlace_enable,
 	interlace => interlace,
 	interlace_field => interlace_field,
+	
+	OSROM_ADDR => OSROM_ADDR,
+    OSROM_DATA => OSROM_DATA,
 
 	HBLANK => HBLANK,
 	VBLANK => VBLANK,

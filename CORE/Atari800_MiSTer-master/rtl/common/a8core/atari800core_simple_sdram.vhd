@@ -154,6 +154,10 @@ ENTITY atari800core_simple_sdram is
 		ATARI800MODE : in STD_LOGIC;
 		ATARI800MODE_16K : in STD_LOGIC;
 		PBI_ROM_MODE : in STD_LOGIC := '0';
+		
+		OSROM_ADDR : OUT STD_LOGIC_VECTOR(13 downto 0);
+        OSROM_DATA : IN  STD_LOGIC_VECTOR(7 downto 0);
+		
 		XEX_LOADER_MODE : in STD_LOGIC := '0';
 		RTC : in std_logic_vector(64 downto 0);
 		VBXE_SWITCH : IN STD_LOGIC := '0';
@@ -212,6 +216,7 @@ ARCHITECTURE vhdl OF atari800core_simple_sdram IS
 	SIGNAL	ROM_REQUEST :  STD_LOGIC;
 	SIGNAL	ROM_REQUEST_COMPLETE :  STD_LOGIC;
 	SIGNAL	ROM_WRITE_ENABLE :  STD_LOGIC;
+	SIGNAL  ROM_REQUEST_REG : STD_LOGIC := '0';
 	
 	-- CONFIG
 	SIGNAL ROM_IN_RAM : STD_LOGIC;
@@ -222,6 +227,20 @@ ARCHITECTURE vhdl OF atari800core_simple_sdram IS
 	SIGNAL POT_IN_EXT : STD_LOGIC_VECTOR(3 downto 0);
 
 BEGIN
+
+OSROM_ADDR <= ROM_ADDR(13 downto 0);
+ROM_DO     <= OSROM_DATA;
+
+process(CLK, RESET_N)
+begin
+   if RESET_N = '0' then
+      ROM_REQUEST_REG <= '0';
+   elsif rising_edge(CLK) then
+      ROM_REQUEST_REG <= ROM_REQUEST;
+   end if;
+end process;
+
+ROM_REQUEST_COMPLETE <= ROM_REQUEST_REG;
 
 -- PIA mapping
 CA1_IN <= SIO_PROC;
@@ -390,9 +409,11 @@ PORT MAP (
 	ROM_ADDR => ROM_ADDR,
 	ROM_WR_ENABLE => ROM_WRITE_ENABLE,
 	ROM_DATA_IN => PBI_WRITE_DATA(7 downto 0),
-	ROM_REQUEST_COMPLETE => ROM_REQUEST_COMPLETE,
+	--ROM_REQUEST_COMPLETE => ROM_REQUEST_COMPLETE,
+	ROM_REQUEST_COMPLETE => open,
 	ROM_REQUEST => ROM_REQUEST,
-	ROM_DATA => ROM_DO,
+	--ROM_DATA => ROM_DO,
+	ROM_DATA => open,
 	
 	RAM_ADDR => RAM_ADDR,
 	RAM_WR_ENABLE => RAM_WRITE_ENABLE,
@@ -403,7 +424,8 @@ PORT MAP (
 );
 
 RAM_DO(15 downto 8) <= (others => '0');
-ROM_IN_RAM <= '1' when internal_rom=0 else '0';
+--ROM_IN_RAM <= '1' when internal_rom=0 else '0';
+ROM_IN_RAM <= '0';
 
 atari800xl : entity work.atari800core
 GENERIC MAP
