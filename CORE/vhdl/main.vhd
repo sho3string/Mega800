@@ -61,7 +61,10 @@ entity main is
       
       atari_osrom_addr_o      : out std_logic_vector(13 downto 0);
       atari_osrom_data_i      : in  std_logic_vector(7 downto 0);
-    
+      
+      atari_basicrom_addr_o   : out std_logic_vector(12 downto 0);
+      atari_basicrom_data_i   : in  std_logic_vector(7 downto 0);
+      
       -- MiSTer core main clock speed:
       -- Make sure you pass very exact numbers here, because they are used for avoiding clock drift at derived clocks
       clk_main_speed_i        : in  natural;
@@ -202,6 +205,9 @@ begin
       
       OSROM_ADDR             => atari_osrom_addr_o,
       OSROM_DATA             => atari_osrom_data_i,
+      
+      BASICROM_ADDR          => atari_basicrom_addr_o,
+      BASICROM_DATA          => atari_basicrom_data_i,
 
       -- SDRAM physical interface:
       -- temporary signals initially,

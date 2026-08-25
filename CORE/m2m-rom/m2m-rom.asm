@@ -117,22 +117,9 @@ PREP_LOAD_IMAGE XOR     R8, R8                  ; no errors
 ; Output:
 ;   R8: 0=OK, else pointer to string with error message
 ;   R9: 0=OK, else error code
-PREP_START     INCRB
+PREP_START    INCRB
 
-                MOVE    CRTROM_AUT_LDF, R0
-                MOVE    @R0, R1
-
-                CMP     1, R1
-                RBRA    _ATARI_ROM_OK, Z
-
-                MOVE    MSG_ROM_FAIL, R8
-                SYSCALL(puts, 1)
-                RBRA    _PREP_START_R, 1
-
-_ATARI_ROM_OK MOVE    MSG_ROM_OK, R8
-                SYSCALL(puts, 1)
-
-_PREP_START_R XOR     R8, R8
+                XOR     R8, R8
                 XOR     R9, R9
 
                 DECRB
@@ -201,8 +188,6 @@ CUSTOM_MSG      XOR     R8, R8
 ; Add your core specific constants and strings here
 
 ; This needs to be the last thing before the "Variables" sections starts
-MSG_ROM_OK      .ASCII_W "Atari OS ROM loaded.\n"
-MSG_ROM_FAIL    .ASCII_W "Atari OS ROM NOT loaded.\n"
 END_OF_ROM      .DW 0
 
 

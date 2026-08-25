@@ -289,6 +289,9 @@ signal atari_osrom_data        : std_logic_vector(7 downto 0);
 signal main_osrom_addr         : std_logic_vector(13 downto 0);
 signal main_osrom_data         : std_logic_vector(7 downto 0);
 
+signal main_basicrom_addr      : std_logic_vector(12 downto 0);
+signal main_basicrom_data      : std_logic_vector(7 downto 0);
+
 begin
 
    hr_core_write_o      <= '0';
@@ -402,6 +405,9 @@ begin
          
          atari_osrom_addr_o   => main_osrom_addr,
          atari_osrom_data_i   => main_osrom_data,
+         
+         atari_basicrom_addr_o => main_basicrom_addr,
+         atari_basicrom_data_i => main_basicrom_data,
          
          clk_main_speed_i     => CORE_CLK_SPEED,
 
@@ -548,14 +554,23 @@ begin
        qnice_osrom_we      <= '0';
        qnice_osrom_addr    <= qnice_dev_addr_i(13 downto 0);
        qnice_osrom_data_to <= qnice_dev_data_i(7 downto 0);
+       
+       qnice_basicrom_we      <= '0';
+       qnice_basicrom_addr    <= qnice_dev_addr_i(12 downto 0);
+       qnice_basicrom_data_to <= qnice_dev_data_i(7 downto 0);
     
        case qnice_dev_id_i is
     
           when C_DEV_ATARI_OSROM =>
-             qnice_osrom_addr    <= qnice_dev_addr_i(13 downto 0);
-             qnice_osrom_we      <= qnice_dev_we_i;
-             qnice_dev_data_o    <= x"00" & qnice_osrom_data_from;
-             qnice_osrom_data_to <= qnice_dev_data_i(7 downto 0);
+             qnice_osrom_addr       <= qnice_dev_addr_i(13 downto 0);
+             qnice_osrom_we         <= qnice_dev_we_i;
+             qnice_dev_data_o       <= x"00" & qnice_osrom_data_from;
+             qnice_osrom_data_to    <= qnice_dev_data_i(7 downto 0);
+          when C_DEV_ATARI_BASICROM =>
+             qnice_basicrom_addr    <= qnice_dev_addr_i(12 downto 0);
+             qnice_basicrom_we      <= qnice_dev_we_i;
+             qnice_dev_data_o       <= x"00" & qnice_basicrom_data_from;
+             qnice_basicrom_data_to <= qnice_dev_data_i(7 downto 0);
     
           when others =>
              null;
@@ -584,6 +599,29 @@ begin
           data_b     => qnice_osrom_data_to,
           wren_b     => qnice_osrom_we,
           q_b        => qnice_osrom_data_from
+   );
+   
+   atari_basicrom : entity work.dualport_2clk_ram
+       generic map (
+          ADDR_WIDTH => 13,
+          DATA_WIDTH => 8,
+          FALLING_A  => false,
+          FALLING_B  => true
+       )
+       port map (
+          -- Atari core side
+          clock_a    => main_clk,
+          address_a  => main_basicrom_addr,
+          data_a     => (others => '0'),
+          wren_a     => '0',
+          q_a        => main_basicrom_data,
+    
+          -- QNICE loader side
+          clock_b    => qnice_clk_i,
+          address_b  => qnice_basicrom_addr,
+          data_b     => qnice_basicrom_data_to,
+          wren_b     => qnice_basicrom_we,
+          q_b        => qnice_basicrom_data_from
    );
 
    ---------------------------------------------------------------------------------------------

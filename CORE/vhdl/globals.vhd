@@ -9,6 +9,7 @@
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
 use IEEE.NUMERIC_STD.ALL;
+use IEEE.NUMERIC_STD_UNSIGNED.ALL;
 
 library work;
 use work.qnice_tools.all;
@@ -108,6 +109,7 @@ constant C_HMAP_DEMO          : std_logic_vector(15 downto 0) := x"0200";     --
 -- the file- and directory browsing capabilities of the firmware
 constant C_DEV_DEMO_VD        : std_logic_vector(15 downto 0) := x"0101";
 constant C_DEV_ATARI_OSROM    : std_logic_vector(15 downto 0) := x"0102";
+constant C_DEV_ATARI_BASICROM : std_logic_vector(15 downto 0) := x"0103";
 constant C_DEV_DEMO_NOBUFFER  : std_logic_vector(15 downto 0) := x"AAAA";
 
 -- Virtual drive management system (handled by vdrives.vhd and the firmware)
@@ -153,8 +155,9 @@ constant C_CRTROMTYPE_OPTIONAL   : std_logic_vector(15 downto 0) := x"0004";
 --       else it is a 4k window in HyperRAM or in SDRAM
 -- In case we are loading to a QNICE device, then the control and status register is located at the 4k window 0xFFFF.
 -- @TODO: See @TODO for more details about the control and status register
-constant C_CRTROMS_MAN_NUM       : natural := 1;                                       -- amount of manually loadable ROMs and carts; maximum is 16
+constant C_CRTROMS_MAN_NUM       : natural := 2;                                       -- amount of manually loadable ROMs and carts; maximum is 16
 constant C_CRTROMS_MAN           : crtrom_buf_array := ( C_CRTROMTYPE_DEVICE,C_DEV_ATARI_OSROM,
+                                                         C_CRTROMTYPE_DEVICE,C_DEV_ATARI_BASICROM,
                                                          x"EEEE");                     -- Always finish the array using x"EEEE"
 
 -- Automatically loaded ROMs: These ROMs are loaded before the core starts
@@ -176,13 +179,19 @@ constant C_CRTROMS_MAN           : crtrom_buf_array := ( C_CRTROMTYPE_DEVICE,C_D
 --               c) Don't forget to finish the C_CRTROMS_AUTO array with x"EEEE"
 
 -- Atari core specific ROMs
-constant ATARI_OS_ROM           : string := "/atari800/a8diag1-6.rom" & ENDSTR;
+--constant ATARI_OS_ROM           : string := "/atari800/a8diag1-6.rom" & ENDSTR;
+constant ATARI_OS_ROM           : string := "/atari800/boot0.rom" & ENDSTR;
+constant ATARI_BASIC_ROM        : string := "/atari800/boot1.rom" & ENDSTR;
 constant ATARI_OS_ROM_START     : std_logic_vector(15 downto 0) := x"0000";
+constant ATARI_BASIC_ROM_START  : std_logic_vector(15 downto 0) := ATARI_OS_ROM_START + ATARI_OS_ROM'length;
+
 
 -- M2M framework constants
-constant C_CRTROMS_AUTO_NUM     : natural := 1;                                       -- Amount of automatically loadable ROMs and carts, maximum is 16
-constant C_CRTROMS_AUTO_NAMES   : string := ATARI_OS_ROM;
-constant C_CRTROMS_AUTO         : crtrom_buf_array := ( C_CRTROMTYPE_DEVICE,C_DEV_ATARI_OSROM,C_CRTROMTYPE_OPTIONAL,ATARI_OS_ROM_START, x"EEEE");
+constant C_CRTROMS_AUTO_NUM     : natural := 2;                                       -- Amount of automatically loadable ROMs and carts, maximum is 16
+constant C_CRTROMS_AUTO_NAMES   : string := ATARI_OS_ROM & ATARI_BASIC_ROM;
+constant C_CRTROMS_AUTO         : crtrom_buf_array := ( C_CRTROMTYPE_DEVICE,C_DEV_ATARI_OSROM,   C_CRTROMTYPE_OPTIONAL,ATARI_OS_ROM_START, 
+                                                        C_CRTROMTYPE_DEVICE,C_DEV_ATARI_BASICROM,C_CRTROMTYPE_OPTIONAL,ATARI_BASIC_ROM_START, 
+                                                        x"EEEE");
 
 ----------------------------------------------------------------------------------------------------------
 -- Audio filters

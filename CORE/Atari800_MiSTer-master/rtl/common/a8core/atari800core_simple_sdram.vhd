@@ -157,6 +157,9 @@ ENTITY atari800core_simple_sdram is
 		
 		OSROM_ADDR : OUT STD_LOGIC_VECTOR(13 downto 0);
         OSROM_DATA : IN  STD_LOGIC_VECTOR(7 downto 0);
+        
+        BASICROM_ADDR : OUT STD_LOGIC_VECTOR(12 downto 0);
+        BASICROM_DATA : IN  STD_LOGIC_VECTOR(7 downto 0);
 		
 		XEX_LOADER_MODE : in STD_LOGIC := '0';
 		RTC : in std_logic_vector(64 downto 0);
@@ -228,8 +231,13 @@ ARCHITECTURE vhdl OF atari800core_simple_sdram IS
 
 BEGIN
 
-OSROM_ADDR <= ROM_ADDR(13 downto 0);
-ROM_DO     <= OSROM_DATA;
+OSROM_ADDR    <= ROM_ADDR(13 downto 0);
+BASICROM_ADDR <= ROM_ADDR(12 downto 0);
+
+--ROM_DO     <= OSROM_DATA;
+
+ROM_DO <= BASICROM_DATA when ROM_ADDR(15 downto 13) = "110" else
+          OSROM_DATA;
 
 process(CLK, RESET_N)
 begin
@@ -409,11 +417,17 @@ PORT MAP (
 	ROM_ADDR => ROM_ADDR,
 	ROM_WR_ENABLE => ROM_WRITE_ENABLE,
 	ROM_DATA_IN => PBI_WRITE_DATA(7 downto 0),
+	
+	-- Temporary BRAM bring-up path: bypass the internal ROM interface.
+    -- OS and BASIC are currently held in dedicated M2M-loaded BRAMs and
+    -- selected externally using ROM_ADDR. This will be revisited when the
+    -- Atari memory interface is migrated to the MEGA65 HyperRAM backend.
+	
 	--ROM_REQUEST_COMPLETE => ROM_REQUEST_COMPLETE,
 	ROM_REQUEST_COMPLETE => open,
 	ROM_REQUEST => ROM_REQUEST,
 	--ROM_DATA => ROM_DO,
-	ROM_DATA => open,
+	ROM_DATA => open, -- 
 	
 	RAM_ADDR => RAM_ADDR,
 	RAM_WR_ENABLE => RAM_WRITE_ENABLE,
@@ -425,6 +439,12 @@ PORT MAP (
 
 RAM_DO(15 downto 8) <= (others => '0');
 --ROM_IN_RAM <= '1' when internal_rom=0 else '0';
+
+-- Temporary BRAM bring-up path: ROMs are supplied directly through
+-- ROM_DO from the dedicated M2M-loaded OS/BASIC BRAMs, not SDRAM.
+-- Revisit this when migrating the Atari memory backend to HyperRAM.
+--ROM_IN_RAM <= '1' when internal_rom=0 else '0';
+
 ROM_IN_RAM <= '0';
 
 atari800xl : entity work.atari800core
