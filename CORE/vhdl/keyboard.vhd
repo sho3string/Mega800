@@ -252,9 +252,19 @@ begin
                 ps2_key_o(7 downto 0) <= x"1A";
   
             when m65_0 =>
-                ps2_key_o(9)          <= not key_pressed_n_i;
-                ps2_key_o(8)          <= '0'; 
-                ps2_key_o(7 downto 0) <= x"45";
+               if mega65_layout_i = '1' and
+                  (key_pressed_n(m65_left_shift)  = '0' or
+                   key_pressed_n(m65_right_shift) = '0')
+               then
+                  -- MEGA65 Shift+0 has no Atari equivalent.
+                  -- Suppress this key completely.
+                  null;
+            
+               else
+                  ps2_key_o(9)          <= not key_pressed_n_i;
+                  ps2_key_o(8)          <= '0';
+                  ps2_key_o(7 downto 0) <= x"45";
+               end if;
             
             when m65_1 =>
                 ps2_key_o(9)          <= not key_pressed_n_i;
