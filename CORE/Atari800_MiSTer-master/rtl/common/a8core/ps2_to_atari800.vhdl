@@ -78,15 +78,59 @@ ARCHITECTURE vhdl OF ps2_to_atari800 IS
 	SIGNAL	SHIFT_PRESSED :  STD_LOGIC;
 	SIGNAL	BREAK_PRESSED :  STD_LOGIC;
 	SIGNAL	CONTROL_PRESSED :  STD_LOGIC;
+	
+    signal direct_caps_reg  : std_logic := '0';
+    signal direct_caps_last : std_logic := '0';
+    signal direct_caps_cnt  : unsigned(19 downto 0) := (others => '0');
+    
+    
+    
 BEGIN
 	process(clk,reset_n)
-	begin
-		if (reset_n='0') then
-			ps2_keys_reg <= (others=>'0');
-		elsif (clk'event and clk='1') then
-			ps2_keys_reg <= ps2_keys_next;
-		end if;
-	end process;
+begin
+   if (reset_n='0') then
+
+      ps2_keys_reg    <= (others=>'0');
+
+      direct_caps_reg  <= '0';
+      direct_caps_last <= '0';
+      direct_caps_cnt  <= (others => '0');
+
+   elsif (clk'event and clk='1') then
+
+      ps2_keys_reg <= ps2_keys_next;
+
+      ------------------------------------------------------------------
+      -- MEGA65 CAPS LOCK is a latching switch.
+      --
+      -- INPUT(16) therefore changes state once for each physical press.
+      -- Convert either transition into a momentary Atari CAPS key.
+      ------------------------------------------------------------------
+      if input(7 downto 0) = x"58" then
+
+       if input(16) /= direct_caps_last then
+    
+          direct_caps_last <= input(16);
+    
+          direct_caps_reg <= '1';
+          direct_caps_cnt <= to_unsigned(500000, direct_caps_cnt'length);
+    
+       end if;
+    
+    end if;
+
+      if direct_caps_reg = '1' then
+
+         if direct_caps_cnt = 0 then
+            direct_caps_reg <= '0';
+         else
+            direct_caps_cnt <= direct_caps_cnt - 1;
+         end if;
+
+      end if;
+
+   end if;
+end process;
 
 gen_ps2_on : if ps2_enable=1 generate
 	keyboard1: entity work.ps2_keyboard
@@ -198,7 +242,9 @@ end generate;
 		atari_keyboard(28)<=ps2_keys_reg(16#76#);
 		--atari_keyboard(39)<=ps2_keys_reg(16#91#);
 		atari_keyboard(39)<=ps2_keys_reg(16#111#);
-		atari_keyboard(60)<=ps2_keys_reg(16#58#);
+		--atari_keyboard(60)<=ps2_keys_reg(16#58#);
+		atari_keyboard(60) <= direct_caps_reg when direct_enable = 1
+                      else ps2_keys_reg(16#58#);
 		atari_keyboard(44)<=ps2_keys_reg(16#0D#);
 		atari_keyboard(12)<=ps2_keys_reg(16#5A#);
 		atari_keyboard(33)<=ps2_keys_reg(16#29#) or SPACE_FORCE;

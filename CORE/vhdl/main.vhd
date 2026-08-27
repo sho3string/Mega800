@@ -156,6 +156,12 @@ signal prevent_reset       : std_logic;
 signal reset_core_n        : std_logic := '1';
 signal reset_core_int      : std_logic := '0';
 
+signal ps2_key             : std_logic_vector(10 downto 0);
+
+signal os_mode_800         : std_logic;
+signal os_800_16k          : std_logic;
+
+
 
 begin
 
@@ -180,7 +186,7 @@ begin
    video_hblank_o <= atari_hblank;
    video_vblank_o <= atari_vblank;
    
-
+  
    --------------------------------------------------------------------------------------------------
    -- Hard reset
    --------------------------------------------------------------------------------------------------
@@ -279,8 +285,8 @@ begin
       cpu_speed               => "000001",
       RAM_SIZE                => "000",
 
-      OS_MODE_800             => '0',
-      OS_800_16K              => '0',
+      OS_MODE_800             => '0',--os_mode_800,
+      OS_800_16K              => '0',--os_800_16k,
       PBI_MODE                => '0',
       XEX_LOADER_MODE         => '0',
 
@@ -312,7 +318,7 @@ begin
 
       CPU_HALT                => cpu_halt,
 
-      PS2_KEY                 => (others => '0'),
+      PS2_KEY                 => ps2_key,
 
       -- joysticks next
       JOY1X                   => (others => '0'),
@@ -332,20 +338,13 @@ begin
     
    
    i_keyboard : entity work.keyboard
-      port map (
-         clk_main_i           => clk_main_i,
-
-         -- Interface to the MEGA65 keyboard
-         key_num_i            => kb_key_num_i,
-         key_pressed_n_i      => kb_key_pressed_n_i,
-
-         -- @TODO: Create the kind of keyboard output that your core needs
-         -- "example_n_o" is a low active register and used by the demo core:
-         --    bit 0: Space
-         --    bit 1: Return
-         --    bit 2: Run/Stop
-         example_n_o          => keyboard_n
-      ); -- i_keyboard
+   port map (
+      clk_main_i        => clk_main_i,
+      key_num_i         => kb_key_num_i,
+      key_pressed_n_i   => kb_key_pressed_n_i,
+      mega65_layout_i   => '1',
+      ps2_key_o         => ps2_key
+   );
 
 end architecture synthesis;
 
