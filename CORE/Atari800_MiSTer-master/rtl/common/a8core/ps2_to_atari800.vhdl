@@ -233,7 +233,9 @@ end generate;
 		atari_keyboard(29)<=ps2_keys_reg(16#2E#);
 		atari_keyboard(27)<=ps2_keys_reg(16#36#);
 		atari_keyboard(51)<=ps2_keys_reg(16#3D#);
-		atari_keyboard(53)<=ps2_keys_reg(16#3E#);
+		--atari_keyboard(53)<=ps2_keys_reg(16#3E#);
+		atari_keyboard(53) <= ps2_keys_reg(16#3E#) or
+                      ps2_keys_reg(16#17F#);
 		atari_keyboard(48)<=ps2_keys_reg(16#46#);
 		--atari_keyboard(17)<=ps2_keys_reg(16#ec#);
 		--atari_keyboard(17)<=ps2_keys_reg(16#16c#);
@@ -248,16 +250,19 @@ end generate;
 		atari_keyboard(44)<=ps2_keys_reg(16#0D#);
 		atari_keyboard(12)<=ps2_keys_reg(16#5A#);
 		atari_keyboard(33)<=ps2_keys_reg(16#29#) or SPACE_FORCE;
-		atari_keyboard(54)<=ps2_keys_reg(16#4E#);
-		atari_keyboard(55)<=ps2_keys_reg(16#55#);
-		atari_keyboard(15)<=ps2_keys_reg(16#5B#) or ps2_keys_reg(16#172#); -- ] -> DN
-		atari_keyboard(14)<=ps2_keys_reg(16#54#) or ps2_keys_reg(16#175#); -- [ -> UP
-		atari_keyboard(6)<=ps2_keys_reg(16#52#) or ps2_keys_reg(16#16b#); -- ' -> Left
-		atari_keyboard(7)<=ps2_keys_reg(16#5D#) or ps2_keys_reg(16#174#); -- \ -> Right
+		atari_keyboard(54)<=ps2_keys_reg(16#4E#) or ps2_keys_reg(16#17B#);
+		atari_keyboard(55)<=ps2_keys_reg(16#55#) or ps2_keys_reg(16#17A#);
+		atari_keyboard(15)<=ps2_keys_reg(16#5B#) or ps2_keys_reg(16#172#)     -- ] -> DN
+		                                         or ps2_keys_reg(16#178#);    -- |
+		atari_keyboard(14)<=ps2_keys_reg(16#54#) or ps2_keys_reg(16#175#);    -- [ -> UP
+		atari_keyboard(6)<=ps2_keys_reg(16#52#) or ps2_keys_reg(16#16b#)     -- ' -> Left
+		                                        or ps2_keys_reg(16#177#);
+		atari_keyboard(7)<=ps2_keys_reg(16#5D#) or ps2_keys_reg(16#174#)      -- \ -> Right
+		                                        or ps2_keys_reg(16#179#);     -- dedicated MEGA65 ^ key
 		atari_keyboard(38)<=ps2_keys_reg(16#4A#);
-		atari_keyboard(2)<=ps2_keys_reg(16#4C#);
-		atari_keyboard(32)<=ps2_keys_reg(16#41#);
-		atari_keyboard(34)<=ps2_keys_reg(16#49#);
+		atari_keyboard(2)<=ps2_keys_reg(16#4C#) or ps2_keys_reg(16#17E#);
+		atari_keyboard(32)<=ps2_keys_reg(16#41#) or ps2_keys_reg(16#17D#);
+		atari_keyboard(34)<=ps2_keys_reg(16#49#) or ps2_keys_reg(16#17C#);
 
 		atari_keyboard(3)<=ps2_keys_reg(16#05#);
 		atari_keyboard(4)<=ps2_keys_reg(16#06#);
@@ -267,7 +272,14 @@ end generate;
 		consol_start_int<=ps2_keys_reg(16#0B#) or INPUT2(0);
 		consol_select_int<=ps2_keys_reg(16#83#) or INPUT2(1);
 		consol_option_int<=ps2_keys_reg(16#0a#) or INPUT2(2);
-		shift_pressed<=ps2_keys_reg(16#12#) or ps2_keys_reg(16#59#);
+		shift_pressed <= ( (ps2_keys_reg(16#12#) or ps2_keys_reg(16#59#)) and not (ps2_keys_reg(16#17B#) or ps2_keys_reg(16#17A#)))
+           or ps2_keys_reg(16#17F#)   -- @
+           or ps2_keys_reg(16#17E#)   -- :
+           or ps2_keys_reg(16#17D#)   -- [
+           or ps2_keys_reg(16#17C#)   -- ]
+           or ps2_keys_reg(16#179#)   -- ^
+           or ps2_keys_reg(16#178#)   -- |
+           or ps2_keys_reg(16#177#);  -- \
 		--control_pressed<=ps2_keys_reg(16#14#) or ps2_keys_reg(16#94#);
 		control_pressed<=ps2_keys_reg(16#14#) or ps2_keys_reg(16#114#) or ps2_keys_reg(16#172#) or ps2_keys_reg(16#175#) or ps2_keys_reg(16#16b#) or ps2_keys_reg(16#174#);
 		break_pressed<=ps2_keys_reg(16#77#) or ps2_keys_reg(16#0E#);

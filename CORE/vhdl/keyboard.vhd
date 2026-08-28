@@ -105,9 +105,16 @@ constant m65_up_crsr    : integer := 73; -- cursor up
 constant m65_left_crsr  : integer := 74; -- cursor left
 constant m65_restore    : integer := 75;
 
-signal key_pressed_n        : std_logic_vector(79 downto 0) := (others => '1');
-signal m65_8_latched_code   : std_logic_vector(7 downto 0) := x"3E";
-signal m65_9_latched_code   : std_logic_vector(7 downto 0) := x"46";
+signal key_pressed_n              : std_logic_vector(79 downto 0) := (others => '1');
+signal m65_8_latched_code         : std_logic_vector(7 downto 0) := x"3E";
+signal m65_9_latched_code         : std_logic_vector(7 downto 0) := x"46";
+
+signal m65_semicolon_latched_code : std_logic_vector(8 downto 0) := '0' & x"4C";
+signal m65_colon_latched_code     : std_logic_vector(8 downto 0) := '1' & x"7E";
+signal m65_comma_latched_code     : std_logic_vector(8 downto 0) := '0' & x"41";
+signal m65_dot_latched_code       : std_logic_vector(8 downto 0) := '0' & x"49";
+signal m65_slash_latched_code     : std_logic_vector(8 downto 0) := '0' & x"4A";
+signal m65_equal_latched_code     : std_logic_vector(8 downto 0) := '0' & x"5B";
 
 begin
 
@@ -367,25 +374,173 @@ begin
                 ps2_key_o(8)          <= '0';  
                 ps2_key_o(7 downto 0) <= x"5A";
             
-            when m65_comma  =>
-                ps2_key_o(9)          <= not key_pressed_n_i;
-                ps2_key_o(8)          <= '0'; 
-                ps2_key_o(7 downto 0) <= x"41";
+            when m65_comma =>
+               if key_pressed_n_i = '0' then
             
-            when m65_dot    =>
-                ps2_key_o(9)          <= not key_pressed_n_i;
-                ps2_key_o(8)          <= '0'; 
-                ps2_key_o(7 downto 0) <= x"49";
+                  if mega65_layout_i = '1' and
+                     (key_pressed_n(m65_left_shift) = '0' or
+                      key_pressed_n(m65_right_shift) = '0')
+                  then
+                     -- MEGA65 Shift+, -> <
+                     -- Private marker E0 7B
+                     m65_comma_latched_code <= '1' & x"7B";
             
-            when m65_slash  =>
-                ps2_key_o(9)          <= not key_pressed_n_i;
-                ps2_key_o(8)          <= '0';  
-                ps2_key_o(7 downto 0) <= x"4A";
+                     ps2_key_o(9)          <= '1';
+                     ps2_key_o(8)          <= '1';
+                     ps2_key_o(7 downto 0) <= x"7B";
+                  else
+                     -- Normal comma
+                     m65_comma_latched_code <= '0' & x"41";
+            
+                     ps2_key_o(9)          <= '1';
+                     ps2_key_o(8)          <= '0';
+                     ps2_key_o(7 downto 0) <= x"41";
+                  end if;
+            
+               else
+                  ps2_key_o(9)          <= '0';
+                  ps2_key_o(8)          <= m65_comma_latched_code(8);
+                  ps2_key_o(7 downto 0) <= m65_comma_latched_code(7 downto 0);
+               end if;
+            
+            when m65_dot =>
+               if key_pressed_n_i = '0' then
+            
+                  if mega65_layout_i = '1' and
+                     key_pressed_n(m65_alt) = '0'
+                  then
+                     -- MEGA65 ALT+. -> |
+                     -- Private marker -> Atari Shift+=
+                     m65_dot_latched_code <= '1' & x"78";
+            
+                     ps2_key_o(9)          <= '1';
+                     ps2_key_o(8)          <= '1';
+                     ps2_key_o(7 downto 0) <= x"78";
+            
+                  elsif mega65_layout_i = '1' and
+                        (key_pressed_n(m65_left_shift) = '0' or
+                         key_pressed_n(m65_right_shift) = '0')
+                  then
+                     -- MEGA65 Shift+. -> >
+                     m65_dot_latched_code <= '1' & x"7A";
+            
+                     ps2_key_o(9)          <= '1';
+                     ps2_key_o(8)          <= '1';
+                     ps2_key_o(7 downto 0) <= x"7A";
+            
+                  else
+                     -- Normal .
+                     m65_dot_latched_code <= '0' & x"49";
+            
+                     ps2_key_o(9)          <= '1';
+                     ps2_key_o(8)          <= '0';
+                     ps2_key_o(7 downto 0) <= x"49";
+                  end if;
+            
+               else
+                  ps2_key_o(9)          <= '0';
+                  ps2_key_o(8)          <= m65_dot_latched_code(8);
+                  ps2_key_o(7 downto 0) <= m65_dot_latched_code(7 downto 0);
+               end if;
+            
+            when m65_slash =>
+               if key_pressed_n_i = '0' then
+            
+                  if mega65_layout_i = '1' and
+                     key_pressed_n(m65_alt) = '0'
+                  then
+                     -- MEGA65 ALT+/ -> \
+                     -- Private marker -> Atari Shift++
+                     m65_slash_latched_code <= '1' & x"77";
+            
+                     ps2_key_o(9)          <= '1';
+                     ps2_key_o(8)          <= '1';
+                     ps2_key_o(7 downto 0) <= x"77";
+            
+                  else
+                     -- Normal /
+                     m65_slash_latched_code <= '0' & x"4A";
+            
+                     ps2_key_o(9)          <= '1';
+                     ps2_key_o(8)          <= '0';
+                     ps2_key_o(7 downto 0) <= x"4A";
+                  end if;
+            
+               else
+                  -- Release exactly what was pressed
+                  ps2_key_o(9)          <= '0';
+                  ps2_key_o(8)          <= m65_slash_latched_code(8);
+                  ps2_key_o(7 downto 0) <= m65_slash_latched_code(7 downto 0);
+               end if;
             
             when m65_semicolon =>
-                ps2_key_o(9)          <= not key_pressed_n_i;
-                ps2_key_o(8)          <= '0';  
-                ps2_key_o(7 downto 0) <= x"4C";
+
+               if key_pressed_n_i = '0' then
+            
+                  if mega65_layout_i = '1' and
+                     (key_pressed_n(m65_left_shift) = '0' or
+                      key_pressed_n(m65_right_shift) = '0')
+                  then
+                     -- Shift+; -> ]
+                     m65_semicolon_latched_code <= '1' & x"7C";
+            
+                     ps2_key_o(9)          <= '1';
+                     ps2_key_o(8)          <= '1';
+                     ps2_key_o(7 downto 0) <= x"7C";
+            
+                  else
+                     -- ;
+                     m65_semicolon_latched_code <= '0' & x"4C";
+            
+                     ps2_key_o(9)          <= '1';
+                     ps2_key_o(8)          <= '0';
+                     ps2_key_o(7 downto 0) <= x"4C";
+                  end if;
+            
+               else
+            
+                  ps2_key_o(9)          <= '0';
+                  ps2_key_o(8)          <= m65_semicolon_latched_code(8);
+                  ps2_key_o(7 downto 0) <= m65_semicolon_latched_code(7 downto 0);
+            
+               end if;
+                
+            when m65_colon =>
+
+               if mega65_layout_i = '1' then
+            
+                  if key_pressed_n_i = '0' then
+            
+                     if key_pressed_n(m65_left_shift) = '0' or
+                        key_pressed_n(m65_right_shift) = '0'
+                     then
+                        -- Shift+: -> [
+                        m65_colon_latched_code <= '1' & x"7D";
+            
+                        ps2_key_o(9)          <= '1';
+                        ps2_key_o(8)          <= '1';
+                        ps2_key_o(7 downto 0) <= x"7D";
+            
+                     else
+                        -- : -> synthetic Atari Shift+;
+                        m65_colon_latched_code <= '1' & x"7E";
+            
+                        ps2_key_o(9)          <= '1';
+                        ps2_key_o(8)          <= '1';
+                        ps2_key_o(7 downto 0) <= x"7E";
+                     end if;
+            
+                  else
+            
+                     ps2_key_o(9)          <= '0';
+                     ps2_key_o(8)          <= m65_colon_latched_code(8);
+                     ps2_key_o(7 downto 0) <= m65_colon_latched_code(7 downto 0);
+            
+                  end if;
+            
+               else
+                  null;
+               end if;
                 
             when m65_left_shift =>
                 ps2_key_o(9)          <= not key_pressed_n_i;
@@ -442,21 +597,42 @@ begin
             
             -- Atari =
             when m65_equal =>
-                ps2_key_o(9)          <= not key_pressed_n_i;
-                ps2_key_o(8)          <= '0';
-                ps2_key_o(7 downto 0) <= x"5B";
+               if mega65_layout_i = '1' and
+                  (key_pressed_n(m65_left_shift) = '0' or
+                   key_pressed_n(m65_right_shift) = '0')
+               then
+                  null;
+               else
+                  ps2_key_o(9)          <= not key_pressed_n_i;
+                  ps2_key_o(8)          <= '0';
+                  ps2_key_o(7 downto 0) <= x"5B";
+               end if;
             
             -- Atari +
             when m65_plus =>
-                ps2_key_o(9)          <= not key_pressed_n_i;
-                ps2_key_o(8)          <= '0';
-                ps2_key_o(7 downto 0) <= x"52";
+               if mega65_layout_i = '1' and
+                  (key_pressed_n(m65_left_shift) = '0' or
+                   key_pressed_n(m65_right_shift) = '0')
+               then
+                  null;
+               else
+                  ps2_key_o(9)          <= not key_pressed_n_i;
+                  ps2_key_o(8)          <= '0';
+                  ps2_key_o(7 downto 0) <= x"52";
+               end if;
             
             -- Atari *
             when m65_asterisk =>
-                ps2_key_o(9)          <= not key_pressed_n_i;
-                ps2_key_o(8)          <= '0';
-                ps2_key_o(7 downto 0) <= x"5D";
+               if mega65_layout_i = '1' and
+                  (key_pressed_n(m65_left_shift) = '0' or
+                   key_pressed_n(m65_right_shift) = '0')
+               then
+                  null;
+               else
+                  ps2_key_o(9)          <= not key_pressed_n_i;
+                  ps2_key_o(8)          <= '0';
+                  ps2_key_o(7 downto 0) <= x"5D";
+               end if;
                 
             when m65_up_crsr =>
                if mega65_layout_i = '1' then
@@ -489,8 +665,41 @@ begin
                   ps2_key_o(8)          <= '1';
                   ps2_key_o(7 downto 0) <= x"74";
                end if;
-
-            when others =>
+               
+            when m65_at =>
+               if mega65_layout_i = '1' then
+                  -- Dedicated MEGA65 @ key.
+                  -- Private marker -> Atari Shift+8.
+                  ps2_key_o(9)          <= not key_pressed_n_i;
+                  ps2_key_o(8)          <= '1';
+                  ps2_key_o(7 downto 0) <= x"7F";
+               else
+                  -- Native Atari layout:
+                  -- @ is produced with Shift+8, so this physical key is unused.
+                  null;
+               end if;
+               
+             -- Atari *
+            when m65_arrow_up =>
+               if mega65_layout_i = '1' then
+            
+                  if key_pressed_n(m65_left_shift) = '0' or
+                     key_pressed_n(m65_right_shift) = '0'
+                  then
+                     -- Shift + ^ has no mapping in MEGA65 mode
+                     null;
+                  else
+                     -- Dedicated MEGA65 ^ key -> Atari Shift+*
+                     ps2_key_o(9)          <= not key_pressed_n_i;
+                     ps2_key_o(8)          <= '1';
+                     ps2_key_o(7 downto 0) <= x"79";
+                  end if;
+            
+               else
+                  null;
+               end if;
+             
+             when others =>
                null;
 
         end case;
