@@ -447,7 +447,10 @@ begin
          pot1_x_i             => main_pot1_x_i,
          pot1_y_i             => main_pot1_y_i,
          pot2_x_i             => main_pot2_x_i,
-         pot2_y_i             => main_pot2_y_i
+         pot2_y_i             => main_pot2_y_i,
+         
+         osm_control_i        => main_osm_control_i
+
       ); -- i_main
       
     atari_os_rom <= "00" when main_osm_control_i(C_MENU_OS_XLXE) else

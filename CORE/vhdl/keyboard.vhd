@@ -18,8 +18,8 @@ clk_main_i : in std_logic;
   -- 0 = Atari 800XL keyboard layout
   -- 1 = MEGA65 glyph-oriented layout
   mega65_layout_i   : in  std_logic;
-
-  ps2_key_o         : out std_logic_vector(10 downto 0) := (others => '0')
+  ps2_key_o         : out std_logic_vector(10 downto 0) := (others => '0');
+  keyboard_n_o      : out std_logic_vector(79 downto 0)
 
 );
 end entity keyboard;
@@ -115,8 +115,20 @@ signal m65_comma_latched_code     : std_logic_vector(8 downto 0) := '0' & x"41";
 signal m65_dot_latched_code       : std_logic_vector(8 downto 0) := '0' & x"49";
 signal m65_slash_latched_code     : std_logic_vector(8 downto 0) := '0' & x"4A";
 signal m65_equal_latched_code     : std_logic_vector(8 downto 0) := '0' & x"5B";
+signal m65_ins_del_latched_code   : std_logic_vector(8 downto 0) := '0' & x"66";
+
+/*
+MEGA65 key	     Atari function
+F1	             OPTION
+F3	             SELECT
+F5	             START
+F7	             RESET
+F9	             HELP
+*/
 
 begin
+
+keyboard_n_o      <= key_pressed_n;
 
 keyboard_state : process(clk_main_i)
 begin
@@ -585,27 +597,93 @@ begin
                
             -- DELETE / BACKSPACE
             when m65_ins_del =>
-                ps2_key_o(9)          <= not key_pressed_n_i;
-                ps2_key_o(8)          <= '0';
-                ps2_key_o(7 downto 0) <= x"66";
+               if key_pressed_n_i = '0' then
+            
+                  if mega65_layout_i = '1' and
+                     key_pressed_n(m65_ctrl) = '0'
+                  then
+                     -- MEGA65 CTRL+INS/DEL -> Atari CTRL+INSERT
+                     m65_ins_del_latched_code <= '1' & x"6E";
+            
+                     ps2_key_o(9)          <= '1';
+                     ps2_key_o(8)          <= '1';
+                     ps2_key_o(7 downto 0) <= x"6E";
+            
+                  elsif mega65_layout_i = '1' and
+                        (key_pressed_n(m65_left_shift) = '0' or
+                         key_pressed_n(m65_right_shift) = '0')
+                  then
+                     -- MEGA65 Shift+INS/DEL -> Atari INSERT
+                     m65_ins_del_latched_code <= '1' & x"70";
+            
+                     ps2_key_o(9)          <= '1';
+                     ps2_key_o(8)          <= '1';
+                     ps2_key_o(7 downto 0) <= x"70";
+            
+                  else
+                     -- Normal DELETE/BACKSPACE
+                     m65_ins_del_latched_code <= '0' & x"66";
+            
+                     ps2_key_o(9)          <= '1';
+                     ps2_key_o(8)          <= '0';
+                     ps2_key_o(7 downto 0) <= x"66";
+                  end if;
+            
+               else
+                  ps2_key_o(9)          <= '0';
+                  ps2_key_o(8)          <= m65_ins_del_latched_code(8);
+                  ps2_key_o(7 downto 0) <= m65_ins_del_latched_code(7 downto 0);
+               end if;
                
             -- Atari -
             when m65_minus =>
-                ps2_key_o(9)          <= not key_pressed_n_i;
-                ps2_key_o(8)          <= '0';
-                ps2_key_o(7 downto 0) <= x"54";
-            
-            -- Atari =
-            when m65_equal =>
                if mega65_layout_i = '1' and
                   (key_pressed_n(m65_left_shift) = '0' or
                    key_pressed_n(m65_right_shift) = '0')
                then
+                  -- MEGA65 Shift+- -> nothing
                   null;
                else
                   ps2_key_o(9)          <= not key_pressed_n_i;
                   ps2_key_o(8)          <= '0';
-                  ps2_key_o(7 downto 0) <= x"5B";
+                  ps2_key_o(7 downto 0) <= x"54";
+               end if;
+            
+            -- Atari =
+            when m65_equal =>
+               if key_pressed_n_i = '0' then
+            
+                  if mega65_layout_i = '1' and
+                     key_pressed_n(m65_alt) = '0'
+                  then
+                     -- MEGA65 ALT+= -> _
+                     -- Private marker -> Atari Shift+-
+                     m65_equal_latched_code <= '1' & x"76";
+            
+                     ps2_key_o(9)          <= '1';
+                     ps2_key_o(8)          <= '1';
+                     ps2_key_o(7 downto 0) <= x"76";
+            
+                  elsif mega65_layout_i = '1' and
+                        (key_pressed_n(m65_left_shift) = '0' or
+                         key_pressed_n(m65_right_shift) = '0')
+                  then
+                     -- MEGA65 Shift+= -> nothing
+                     null;
+            
+                  else
+                     -- Normal =
+                     m65_equal_latched_code <= '0' & x"5B";
+            
+                     ps2_key_o(9)          <= '1';
+                     ps2_key_o(8)          <= '0';
+                     ps2_key_o(7 downto 0) <= x"5B";
+                  end if;
+            
+               else
+                  ps2_key_o(9)          <= '0';
+                  ps2_key_o(8)          <= m65_equal_latched_code(8);
+                  ps2_key_o(7 downto 0) <= m65_equal_latched_code(7 downto 0);
                end if;
             
             -- Atari +
@@ -695,6 +773,38 @@ begin
                      ps2_key_o(7 downto 0) <= x"79";
                   end if;
             
+               else
+                  null;
+               end if;
+             
+             when m65_clr_home =>
+               if mega65_layout_i = '1' then
+            
+                  if key_pressed_n(m65_left_shift) = '0' or
+                     key_pressed_n(m65_right_shift) = '0'
+                  then
+                     -- MEGA65 Shift+CLR/HOME -> nothing
+                     null;
+            
+                  else
+                     -- MEGA65 CLR/HOME -> Atari CLEAR
+                     -- Atari CLEAR = Shift+<
+                     ps2_key_o(9)          <= not key_pressed_n_i;
+                     ps2_key_o(8)          <= '1';
+                     ps2_key_o(7 downto 0) <= x"73";
+                  end if;
+            
+               else
+                  null;
+               end if;
+               
+             when m65_arrow_left =>
+               if mega65_layout_i = '1' then
+                  -- MEGA65 ← symbol -> Atari DEL
+                  -- Atari DEL = Shift+DELETE/BACKSPACE
+                  ps2_key_o(9)          <= not key_pressed_n_i;
+                  ps2_key_o(8)          <= '1';
+                  ps2_key_o(7 downto 0) <= x"6F";
                else
                   null;
                end if;

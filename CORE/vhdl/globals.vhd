@@ -18,20 +18,25 @@ use work.video_modes_pkg.all;
 package globals is
 
 -- Menu items
-constant C_MENU_HDMI_16_9_50   : natural := 12;
-constant C_MENU_HDMI_16_9_60   : natural := 13;
-constant C_MENU_HDMI_4_3_50    : natural := 14;
-constant C_MENU_HDMI_5_4_50    : natural := 15;
-constant C_MENU_HDMI_640_60    : natural := 16;
-constant C_MENU_HDMI_720_5994  : natural := 17;
-constant C_MENU_SVGA_800_60    : natural := 18;
-constant C_MENU_CRT_EMULATION  : natural := 30;
-constant C_MENU_HDMI_ZOOM      : natural := 31;
-constant C_MENU_IMPROVE_AUDIO  : natural := 32;
-constant C_MENU_OS_XLXE        : natural := 37;
-constant C_MENU_OS_OSA         : natural := 38;
-constant C_MENU_OS_OSB         : natural := 39;
-constant C_MENU_OS_CUSTOM      : natural := 40;
+constant C_MENU_HDMI_16_9_50   : natural := 9;
+constant C_MENU_HDMI_16_9_60   : natural := 10;
+constant C_MENU_HDMI_4_3_50    : natural := 11;
+constant C_MENU_HDMI_5_4_50    : natural := 12;
+constant C_MENU_HDMI_640_60    : natural := 13;
+constant C_MENU_HDMI_720_5994  : natural := 14;
+constant C_MENU_SVGA_800_60    : natural := 15;
+
+constant C_MENU_CRT_EMULATION  : natural := 21;
+constant C_MENU_HDMI_ZOOM      : natural := 22;
+constant C_MENU_IMPROVE_AUDIO  : natural := 23;
+
+constant C_MENU_OS_XLXE        : natural := 28;
+constant C_MENU_OS_OSA         : natural := 29;
+constant C_MENU_OS_OSB         : natural := 30;
+constant C_MENU_OS_CUSTOM      : natural := 31;
+
+constant C_MENU_KBD_MEGA65     : natural := 35;
+constant C_MENU_KBD_ATARI      : natural := 36;
 
 ----------------------------------------------------------------------------------------------------------
 -- QNICE Firmware
@@ -120,11 +125,9 @@ constant C_DEV_DEMO_NOBUFFER  : std_logic_vector(15 downto 0) := x"AAAA";
 -- Otherwise make sure that you wire C_VD_DEVICE in the qnice_ramrom_devices process and that you
 -- have as many appropriately sized RAM buffers for disk images as you have drives
 type vd_buf_array is array(natural range <>) of std_logic_vector;
-constant C_VDNUM              : natural := 3;                                          -- amount of virtual drives; maximum is 15
+constant C_VDNUM              : natural := 1;                                          -- amount of virtual drives; maximum is 15
 constant C_VD_DEVICE          : std_logic_vector(15 downto 0) := C_DEV_DEMO_VD;        -- device number of vdrives.vhd device
 constant C_VD_BUFFER          : vd_buf_array := (  C_DEV_DEMO_NOBUFFER,
-                                                   C_DEV_DEMO_NOBUFFER,
-                                                   C_DEV_DEMO_NOBUFFER,
                                                    x"EEEE");                           -- Always finish the array using x"EEEE"
 
 ----------------------------------------------------------------------------------------------------------

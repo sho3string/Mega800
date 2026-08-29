@@ -67,8 +67,11 @@ PORT
 	SET_FREEZER_IN : in std_logic;
 	SET_RESET_RNMI_IN : in std_logic;
 	SET_OPTION_FORCE_IN : in std_logic;
+	SET_SELECT_FORCE_IN : in std_logic;
 	SET_START_FORCE_IN : in std_logic;
+	SET_HELP_FORCE_IN  : in std_logic;
 	SET_SPACE_FORCE_IN : in std_logic;
+
 	CART1_SELECT_IN : in std_logic_vector(7 downto 0);
 	CART2_SELECT_IN : in std_logic_vector(7 downto 0);
 	EMU_FLASH_REQUEST : out std_logic;
@@ -246,6 +249,10 @@ signal tape_pwm_motor : std_logic;
 signal fsk_act : std_logic;
 signal pwm_act : std_logic;
 
+signal consol_option_combined : std_logic;
+signal consol_select_combined : std_logic;
+signal consol_start_combined  : std_logic;
+
 constant tape_pwm_config_none : std_logic_vector(2 downto 0) := "000";
 constant tape_pwm_config_2000 : std_logic_vector(2 downto 0) := "001";
 constant tape_pwm_config_turbod : std_logic_vector(2 downto 0) := "010";
@@ -256,6 +263,10 @@ constant tape_pwm_config_rambit : std_logic_vector(2 downto 0) := "110";
 constant tape_pwm_config_6000 : std_logic_vector(2 downto 0) := "111";
 
 BEGIN
+
+consol_option_combined <= CONSOL_OPTION or SET_OPTION_FORCE_IN;
+consol_select_combined <= CONSOL_SELECT or SET_SELECT_FORCE_IN;
+consol_start_combined  <= CONSOL_START  or SET_START_FORCE_IN;
 
 areset_n <= (SDRAM_RESET_N and not(reset_atari));
 areset <= not areset_n;
@@ -348,6 +359,7 @@ PORT MAP
 	INPUT => x"000"&"000"&ps2_key(9)&"000"&ps2_key(8)&x"0"&ps2_key(7 downto 0),
 	INPUT2 => JOY(13 downto 9),
 	SPACE_FORCE => space_tmp,
+	HELP_FORCE  => SET_HELP_FORCE_IN,
 
 	KEYBOARD_SCAN => KEYBOARD_SCAN,
 	KEYBOARD_RESPONSE => KEYBOARD_RESPONSE,
@@ -431,9 +443,9 @@ PORT MAP
 	ENABLE_179_EARLY => emu_pokey_enable,
 	PORTA_OUT_EXP => porta_out,
 
-	CONSOL_OPTION => CONSOL_OPTION or option_tmp,
-	CONSOL_SELECT => CONSOL_SELECT,
-	CONSOL_START => CONSOL_START or start_tmp,
+	CONSOL_OPTION => consol_option_combined,
+    CONSOL_SELECT => consol_select_combined,
+    CONSOL_START  => consol_start_combined,
 
 	SDRAM_REQUEST => SDRAM_REQUEST,
 	SDRAM_REQUEST_COMPLETE => SDRAM_REQUEST_COMPLETE,

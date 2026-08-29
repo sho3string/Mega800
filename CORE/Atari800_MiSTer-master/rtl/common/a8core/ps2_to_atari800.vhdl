@@ -30,6 +30,7 @@ PORT
 	INPUT  : IN STD_LOGIC_VECTOR(31 downto 0) := (others=>'0');
 	INPUT2 : IN STD_LOGIC_VECTOR(4 downto 0) := (others=>'0');
 	SPACE_FORCE : IN STD_LOGIC := '0';
+	HELP_FORCE  : IN STD_LOGIC := '0';
 
 	KEYBOARD_SCAN : IN STD_LOGIC_VECTOR(5 downto 0);
 	KEYBOARD_RESPONSE : OUT STD_LOGIC_VECTOR(1 downto 0);
@@ -188,7 +189,7 @@ end generate;
 	end process;
 
 	-- map to atari key code
-	process(ps2_keys_reg, input2, SPACE_FORCE)
+	process(ps2_keys_reg, input2, SPACE_FORCE,HELP_FORCE)
 	begin
 		atari_keyboard <= (others=>'0');
 
@@ -239,8 +240,9 @@ end generate;
 		atari_keyboard(48)<=ps2_keys_reg(16#46#);
 		--atari_keyboard(17)<=ps2_keys_reg(16#ec#);
 		--atari_keyboard(17)<=ps2_keys_reg(16#16c#);
-		atari_keyboard(17)<=ps2_keys_reg(16#16c#) or ps2_keys_reg(16#03#);
-		atari_keyboard(52)<=ps2_keys_reg(16#66#);
+		atari_keyboard(17)<=ps2_keys_reg(16#16c#) or ps2_keys_reg(16#03#)
+		                                          or HELP_FORCE;
+		atari_keyboard(52) <= ps2_keys_reg(16#66#) or ps2_keys_reg(16#16F#);  -- Atari DEL / delete line
 		atari_keyboard(28)<=ps2_keys_reg(16#76#);
 		--atari_keyboard(39)<=ps2_keys_reg(16#91#);
 		atari_keyboard(39)<=ps2_keys_reg(16#111#);
@@ -250,15 +252,19 @@ end generate;
 		atari_keyboard(44)<=ps2_keys_reg(16#0D#);
 		atari_keyboard(12)<=ps2_keys_reg(16#5A#);
 		atari_keyboard(33)<=ps2_keys_reg(16#29#) or SPACE_FORCE;
-		atari_keyboard(54)<=ps2_keys_reg(16#4E#) or ps2_keys_reg(16#17B#);
-		atari_keyboard(55)<=ps2_keys_reg(16#55#) or ps2_keys_reg(16#17A#);
-		atari_keyboard(15)<=ps2_keys_reg(16#5B#) or ps2_keys_reg(16#172#)     -- ] -> DN
-		                                         or ps2_keys_reg(16#178#);    -- |
-		atari_keyboard(14)<=ps2_keys_reg(16#54#) or ps2_keys_reg(16#175#);    -- [ -> UP
-		atari_keyboard(6)<=ps2_keys_reg(16#52#) or ps2_keys_reg(16#16b#)     -- ' -> Left
+		atari_keyboard(54)<=ps2_keys_reg(16#4E#) or ps2_keys_reg(16#17B#)
+		                                         or ps2_keys_reg(16#173#); -- CLEAR
+		atari_keyboard(55)<=ps2_keys_reg(16#55#) or ps2_keys_reg(16#17A#)
+		                                         or ps2_keys_reg(16#170#)  -- INSERT
+		                                         or ps2_keys_reg(16#16E#);
+		atari_keyboard(15)<=ps2_keys_reg(16#5B#) or ps2_keys_reg(16#172#)  -- ] -> DN
+		                                         or ps2_keys_reg(16#178#); -- |
+		atari_keyboard(14)<=ps2_keys_reg(16#54#) or ps2_keys_reg(16#175#)  -- [ -> UP
+		                                         or ps2_keys_reg(16#176#); -- _
+		atari_keyboard(6)<=ps2_keys_reg(16#52#) or ps2_keys_reg(16#16b#)   -- ' -> Left
 		                                        or ps2_keys_reg(16#177#);
-		atari_keyboard(7)<=ps2_keys_reg(16#5D#) or ps2_keys_reg(16#174#)      -- \ -> Right
-		                                        or ps2_keys_reg(16#179#);     -- dedicated MEGA65 ^ key
+		atari_keyboard(7)<=ps2_keys_reg(16#5D#) or ps2_keys_reg(16#174#)   -- \ -> Right
+		                                        or ps2_keys_reg(16#179#);  -- dedicated MEGA65 ^ key
 		atari_keyboard(38)<=ps2_keys_reg(16#4A#);
 		atari_keyboard(2)<=ps2_keys_reg(16#4C#) or ps2_keys_reg(16#17E#);
 		atari_keyboard(32)<=ps2_keys_reg(16#41#) or ps2_keys_reg(16#17D#);
@@ -272,16 +278,28 @@ end generate;
 		consol_start_int<=ps2_keys_reg(16#0B#) or INPUT2(0);
 		consol_select_int<=ps2_keys_reg(16#83#) or INPUT2(1);
 		consol_option_int<=ps2_keys_reg(16#0a#) or INPUT2(2);
-		shift_pressed <= ( (ps2_keys_reg(16#12#) or ps2_keys_reg(16#59#)) and not (ps2_keys_reg(16#17B#) or ps2_keys_reg(16#17A#)))
+		shift_pressed <= ( (ps2_keys_reg(16#12#) or ps2_keys_reg(16#59#))
+                    and not (ps2_keys_reg(16#17B#) or ps2_keys_reg(16#17A#)))
            or ps2_keys_reg(16#17F#)   -- @
            or ps2_keys_reg(16#17E#)   -- :
            or ps2_keys_reg(16#17D#)   -- [
            or ps2_keys_reg(16#17C#)   -- ]
            or ps2_keys_reg(16#179#)   -- ^
            or ps2_keys_reg(16#178#)   -- |
-           or ps2_keys_reg(16#177#);  -- \
+           or ps2_keys_reg(16#177#)   -- \
+           or ps2_keys_reg(16#176#)   -- _
+           or ps2_keys_reg(16#173#)   -- CLEAR
+           or ps2_keys_reg(16#170#)   -- INSERT
+           or ps2_keys_reg(16#16F#);   -- DEL / delete line
+         
 		--control_pressed<=ps2_keys_reg(16#14#) or ps2_keys_reg(16#94#);
-		control_pressed<=ps2_keys_reg(16#14#) or ps2_keys_reg(16#114#) or ps2_keys_reg(16#172#) or ps2_keys_reg(16#175#) or ps2_keys_reg(16#16b#) or ps2_keys_reg(16#174#);
+		control_pressed<=ps2_keys_reg(16#14#) or 
+		                 ps2_keys_reg(16#114#) or 
+		                 ps2_keys_reg(16#172#) or 
+		                 ps2_keys_reg(16#175#) or 
+		                 ps2_keys_reg(16#16b#) or 
+		                 ps2_keys_reg(16#174#) or
+		                 ps2_keys_reg(16#16E#);  -- CTRL+INSERT
 		break_pressed<=ps2_keys_reg(16#77#) or ps2_keys_reg(16#0E#);
 
 		fkeys_int(0)<=ps2_keys_reg(16#05#);
