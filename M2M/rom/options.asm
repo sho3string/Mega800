@@ -260,6 +260,16 @@ HELP_MENU_INIT  SYSCALL(enter, 1)
                 MOVE    @R12, R12
                 RSUB    OPTM_INIT, 1
 
+                ; The menu window (net size from config.vhd plus two
+                ; characters for the frame) needs to fit on the screen,
+                ; otherwise the firmware would draw outside the video ram:
+                ; Show a fatal error, if it does not fit
+                MOVE    SCR$SYS_DX, R8          ; screen width in chars
+                MOVE    @R8, R8
+                MOVE    SCR$SYS_DY, R9          ; screen height in chars
+                MOVE    @R9, R9
+                RSUB    OPTM_CHK_WIN, 1
+
                 ; extract the amount of menu items (including empty lines and
                 ; headlines) from config.vhd
                 MOVE    M2M$RAMROM_DEV, R0      ; Device=config.vhd
@@ -686,13 +696,15 @@ ROSM_SAVE       SYSCALL(enter, 1)
                 RSUB    VD_ACTIVE, 1            ; any vdrives at all?
                 RBRA    _ROSMS_1, !C            ; no, so no danger of corruptn
                 MOVE    R8, R0                  ; R0: amount of vdrives
-                XOR     R8, R8                  ; vdrive id
-_ROSMS_0        MOVE    VD_CACHE_DIRTY, R9
+                XOR     R1, R1                  ; R1: vdrive id
+_ROSMS_0        MOVE    R1, R8                  ; VD_DRV_READ destroys R8, so
+                                                ; the id is kept in R1
+                MOVE    VD_CACHE_DIRTY, R9
                 RSUB    VD_DRV_READ, 1          ; get dirty flag for curr. drv
                 CMP     0, R8                   ; dirty?
                 RBRA    _ROSMS_NOWR, !Z         ; yes: do not save
-                ADD     1, R8                   ; no: check next vdrive
-                CMP     R0, R8                  ; done?
+                ADD     1, R1                   ; no: check next vdrive
+                CMP     R0, R1                  ; done?
                 RBRA    _ROSMS_0, !Z            ; no: next iteration
                 RBRA    _ROSMS_1, 1             ; yes: detect changes & save
 

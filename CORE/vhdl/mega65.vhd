@@ -39,6 +39,8 @@ port (
    qnice_audio_mute_o      : out std_logic;
    qnice_audio_filter_o    : out std_logic;
    qnice_zoom_crop_o       : out std_logic;
+   qnice_hdmi_view_size_o  : out std_logic_vector(1 downto 0) := (others => '0');
+
    qnice_ascal_mode_o      : out std_logic_vector(1 downto 0);
    qnice_ascal_polyphase_o : out std_logic;
    qnice_ascal_triplebuf_o : out std_logic;
@@ -293,6 +295,8 @@ signal main_basicrom_addr      : std_logic_vector(12 downto 0);
 signal main_basicrom_data      : std_logic_vector(7 downto 0);
 
 begin
+
+   qnice_hdmi_view_size_o <= (others => '0');
 
    hr_core_write_o      <= '0';
    hr_core_read_o       <= '0';

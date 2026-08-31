@@ -17,6 +17,9 @@ use work.video_modes_pkg.all;
 
 package globals is
 
+constant VGA_STD_SYNC : vga_sync_reshaper_cfg_t := C_VGA_SYNC_RESHAPER_OFF;
+constant HDMI_VIEW    : hdmi_view_cfg_t         := C_HDMI_VIEW_LEGACY;
+
 -- Menu items
 constant C_MENU_HDMI_16_9_50   : natural := 9;
 constant C_MENU_HDMI_16_9_60   : natural := 10;
