@@ -548,12 +548,16 @@ begin
 
    -- Flip joystick ports (i.e. the joystick in port 2 is used as joystick 1 and vice versa)
    qnice_flip_joyports_o      <= '0';
-
+   
+   
    ---------------------------------------------------------------------------------------------
    -- Core specific device handling (QNICE clock domain)
    ---------------------------------------------------------------------------------------------
 
    core_specific_devices : process(all)
+       -- Check if QNICE wants to access its "CSR Window" and if so, we ignore writes.
+       variable qnice_csr_window        : std_logic;
+       constant CRTROM_CSR_PT_OK        : std_logic_vector(15 downto 0) := x"0002";
     begin
        qnice_dev_data_o   <= x"EEEE";
        qnice_dev_wait_o   <= '0';
@@ -565,20 +569,22 @@ begin
        qnice_basicrom_we      <= '0';
        qnice_basicrom_addr    <= qnice_dev_addr_i(12 downto 0);
        qnice_basicrom_data_to <= qnice_dev_data_i(7 downto 0);
+       
+       qnice_csr_window := '1' when qnice_dev_addr_i(27 downto 12) = x"FFFF" else '0';
+
     
        case qnice_dev_id_i is
     
           when C_DEV_ATARI_OSROM =>
              qnice_osrom_addr       <= qnice_dev_addr_i(13 downto 0);
-             qnice_osrom_we         <= qnice_dev_we_i;
-             qnice_dev_data_o       <= x"00" & qnice_osrom_data_from;
+             qnice_osrom_we         <= qnice_dev_we_i and not qnice_csr_window;
+             qnice_dev_data_o       <= CRTROM_CSR_PT_OK when qnice_csr_window else x"00" & qnice_osrom_data_from;
              qnice_osrom_data_to    <= qnice_dev_data_i(7 downto 0);
           when C_DEV_ATARI_BASICROM =>
              qnice_basicrom_addr    <= qnice_dev_addr_i(12 downto 0);
-             qnice_basicrom_we      <= qnice_dev_we_i;
-             qnice_dev_data_o       <= x"00" & qnice_basicrom_data_from;
+             qnice_basicrom_we      <= qnice_dev_we_i and not qnice_csr_window;
+             qnice_dev_data_o       <= CRTROM_CSR_PT_OK when qnice_csr_window else x"00" & qnice_basicrom_data_from;
              qnice_basicrom_data_to <= qnice_dev_data_i(7 downto 0);
-    
           when others =>
              null;
     
