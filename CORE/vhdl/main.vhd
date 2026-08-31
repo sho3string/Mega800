@@ -225,8 +225,8 @@ begin
     video_hblank_o <= atari_hblank;
     video_vblank_o <= atari_vblank;
     
-    -- Keyboard mapping mode '1' = Atari positional, '0' = MEGA65 semantic.
-    mega65_kblayout <= osm_control_i(C_MENU_KBD_ATARI);
+    -- Keyboard mapping mode '0' = Atari positional, '1' = MEGA65 semantic.
+    mega65_kblayout <= osm_control_i(C_MENU_KBD_MEGA65);
     
     
    --------------------------------------------------------------------------------------------------

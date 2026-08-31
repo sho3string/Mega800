@@ -36,10 +36,13 @@ constant C_MENU_IMPROVE_AUDIO  : natural := 23;
 constant C_MENU_OS_XLXE        : natural := 28;
 constant C_MENU_OS_OSA         : natural := 29;
 constant C_MENU_OS_OSB         : natural := 30;
-constant C_MENU_OS_CUSTOM      : natural := 31;
 
-constant C_MENU_KBD_MEGA65     : natural := 35;
+-- ROM loader menu entries
+constant C_MENU_OS_LOAD_16K    : natural := 31;
+constant C_MENU_OS_LOAD_10K    : natural := 32;
+
 constant C_MENU_KBD_ATARI      : natural := 36;
+constant C_MENU_KBD_MEGA65     : natural := 37;
 
 ----------------------------------------------------------------------------------------------------------
 -- QNICE Firmware
@@ -115,10 +118,12 @@ constant C_HMAP_DEMO          : std_logic_vector(15 downto 0) := x"0200";     --
 
 -- example virtual drive handler, which is connected to nothing and only here to demo
 -- the file- and directory browsing capabilities of the firmware
-constant C_DEV_DEMO_VD        : std_logic_vector(15 downto 0) := x"0101";
-constant C_DEV_ATARI_OSROM    : std_logic_vector(15 downto 0) := x"0102";
-constant C_DEV_ATARI_BASICROM : std_logic_vector(15 downto 0) := x"0103";
-constant C_DEV_DEMO_NOBUFFER  : std_logic_vector(15 downto 0) := x"AAAA";
+constant C_DEV_DEMO_VD          : std_logic_vector(15 downto 0) := x"0101";
+constant C_DEV_ATARI_OSROM_16K  : std_logic_vector(15 downto 0) := x"0102";
+constant C_DEV_ATARI_BASICROM   : std_logic_vector(15 downto 0) := x"0103";
+constant C_DEV_ATARI_OSROM_10K  : std_logic_vector(15 downto 0) := x"0104";
+
+constant C_DEV_DEMO_NOBUFFER    : std_logic_vector(15 downto 0) := x"AAAA";
 
 -- Virtual drive management system (handled by vdrives.vhd and the firmware)
 -- If you are not using virtual drives, make sure that:
@@ -161,10 +166,13 @@ constant C_CRTROMTYPE_OPTIONAL   : std_logic_vector(15 downto 0) := x"0004";
 --       else it is a 4k window in HyperRAM or in SDRAM
 -- In case we are loading to a QNICE device, then the control and status register is located at the 4k window 0xFFFF.
 -- @TODO: See @TODO for more details about the control and status register
-constant C_CRTROMS_MAN_NUM       : natural := 2;                                       -- amount of manually loadable ROMs and carts; maximum is 16
-constant C_CRTROMS_MAN           : crtrom_buf_array := ( C_CRTROMTYPE_DEVICE,C_DEV_ATARI_OSROM,
-                                                         C_CRTROMTYPE_DEVICE,C_DEV_ATARI_BASICROM,
-                                                         x"EEEE");                     -- Always finish the array using x"EEEE"
+constant C_CRTROMS_MAN_NUM       : natural := 3;                                       -- amount of manually loadable ROMs and carts; maximum is 16
+constant C_CRTROMS_MAN : crtrom_buf_array := (
+   C_CRTROMTYPE_DEVICE, C_DEV_ATARI_OSROM_16K,
+   C_CRTROMTYPE_DEVICE, C_DEV_ATARI_OSROM_10K,
+   C_CRTROMTYPE_DEVICE, C_DEV_ATARI_BASICROM,
+   x"EEEE"
+);
 
 -- Automatically loaded ROMs: These ROMs are loaded before the core starts
 --
@@ -195,9 +203,11 @@ constant ATARI_BASIC_ROM_START  : std_logic_vector(15 downto 0) := ATARI_OS_ROM_
 -- M2M framework constants
 constant C_CRTROMS_AUTO_NUM     : natural := 2;                                       -- Amount of automatically loadable ROMs and carts, maximum is 16
 constant C_CRTROMS_AUTO_NAMES   : string := ATARI_OS_ROM & ATARI_BASIC_ROM;
-constant C_CRTROMS_AUTO         : crtrom_buf_array := ( C_CRTROMTYPE_DEVICE,C_DEV_ATARI_OSROM,   C_CRTROMTYPE_OPTIONAL,ATARI_OS_ROM_START, 
-                                                        C_CRTROMTYPE_DEVICE,C_DEV_ATARI_BASICROM,C_CRTROMTYPE_OPTIONAL,ATARI_BASIC_ROM_START, 
-                                                        x"EEEE");
+constant C_CRTROMS_AUTO : crtrom_buf_array := (
+   C_CRTROMTYPE_DEVICE, C_DEV_ATARI_OSROM_16K, C_CRTROMTYPE_OPTIONAL, ATARI_OS_ROM_START,
+   C_CRTROMTYPE_DEVICE, C_DEV_ATARI_BASICROM,  C_CRTROMTYPE_OPTIONAL, ATARI_BASIC_ROM_START,
+   x"EEEE"
+);
 
 ----------------------------------------------------------------------------------------------------------
 -- Audio filters

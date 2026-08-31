@@ -294,6 +294,17 @@ signal main_osrom_data         : std_logic_vector(7 downto 0);
 signal main_basicrom_addr      : std_logic_vector(12 downto 0);
 signal main_basicrom_data      : std_logic_vector(7 downto 0);
 
+signal rom_written_qnice       : std_logic := '0';
+signal rom_loaded_toggle       : std_logic := '0';
+
+signal rom_loaded_sync1        : std_logic := '0';
+signal rom_loaded_sync2        : std_logic := '0';
+signal rom_loaded_sync2_prev   : std_logic := '0';
+signal rom_loaded_reset        : std_logic := '0';
+
+signal main_reset_core_int     : std_logic;
+signal rom_csr_written_qnice   : std_logic := '0';
+
 begin
 
    qnice_hdmi_view_size_o <= (others => '0');
@@ -391,6 +402,8 @@ begin
    -- We switch it to blue when a long reset is detected and as long as the user keeps pressing the preset button
    main_power_led_o     <= '1';
    main_power_led_col_o <= x"0000FF" when main_reset_m2m_i else x"00FF00";
+   
+   main_reset_core_int  <= main_reset_core_i or rom_loaded_reset;
 
    -- main.vhd contains the actual MiSTer core
    i_main : entity work.main
@@ -401,7 +414,7 @@ begin
          clk_main_i           => main_clk,
          clk_mem_i            => mem_clk,
          clk_video_i          => video_clk,
-         reset_soft_i         => main_reset_core_i,
+         reset_soft_i         => main_reset_core_int,
          reset_hard_i         => main_reset_m2m_i,
          pause_i              => main_pause_core_i,
 
@@ -574,22 +587,113 @@ begin
 
     
        case qnice_dev_id_i is
-    
-          when C_DEV_ATARI_OSROM =>
-             qnice_osrom_addr       <= qnice_dev_addr_i(13 downto 0);
-             qnice_osrom_we         <= qnice_dev_we_i and not qnice_csr_window;
-             qnice_dev_data_o       <= CRTROM_CSR_PT_OK when qnice_csr_window else x"00" & qnice_osrom_data_from;
-             qnice_osrom_data_to    <= qnice_dev_data_i(7 downto 0);
-          when C_DEV_ATARI_BASICROM =>
-             qnice_basicrom_addr    <= qnice_dev_addr_i(12 downto 0);
-             qnice_basicrom_we      <= qnice_dev_we_i and not qnice_csr_window;
-             qnice_dev_data_o       <= CRTROM_CSR_PT_OK when qnice_csr_window else x"00" & qnice_basicrom_data_from;
-             qnice_basicrom_data_to <= qnice_dev_data_i(7 downto 0);
-          when others =>
-             null;
-    
-       end case;
+           -- XL/XE 16K OS:
+           -- file $0000-$3FFF maps directly to BRAM $0000-$3FFF
+           when C_DEV_ATARI_OSROM_16K =>
+              qnice_osrom_addr       <= qnice_dev_addr_i(13 downto 0);
+              qnice_osrom_we         <= qnice_dev_we_i and not qnice_csr_window;
+              qnice_dev_data_o       <= CRTROM_CSR_PT_OK when qnice_csr_window else
+                                        x"00" & qnice_osrom_data_from;
+              qnice_osrom_data_to    <= qnice_dev_data_i(7 downto 0);
+        
+           -- 400/800 10K OS:
+           -- file $0000-$27FF maps to BRAM $1800-$3FFF
+           when C_DEV_ATARI_OSROM_10K =>
+              qnice_osrom_addr       <= std_logic_vector(
+                                           unsigned(qnice_dev_addr_i(13 downto 0)) +
+                                           to_unsigned(16#1800#, 14)
+                                        );
+              qnice_osrom_we         <= qnice_dev_we_i and not qnice_csr_window;
+              qnice_dev_data_o       <= CRTROM_CSR_PT_OK when qnice_csr_window else
+                                        x"00" & qnice_osrom_data_from;
+              qnice_osrom_data_to    <= qnice_dev_data_i(7 downto 0);
+        
+           when C_DEV_ATARI_BASICROM =>
+              qnice_basicrom_addr       <= qnice_dev_addr_i(12 downto 0);
+              qnice_basicrom_we         <= qnice_dev_we_i and not qnice_csr_window;
+              qnice_dev_data_o          <= CRTROM_CSR_PT_OK when qnice_csr_window else
+                                           x"00" & qnice_basicrom_data_from;
+              qnice_basicrom_data_to    <= qnice_dev_data_i(7 downto 0);
+        
+           when others =>
+              null;
+        
+        end case;
     end process core_specific_devices;
+    
+    rom_load_detect : process(qnice_clk_i)
+    begin
+       if falling_edge(qnice_clk_i) then
+    
+          if qnice_rst_i = '1' then
+             rom_written_qnice     <= '0';
+             rom_csr_written_qnice <= '0';
+             rom_loaded_toggle     <= '0';
+    
+          elsif qnice_dev_ce_i = '1' then
+    
+             case qnice_dev_id_i is
+    
+                when C_DEV_ATARI_OSROM_16K |
+                     C_DEV_ATARI_OSROM_10K |
+                     C_DEV_ATARI_BASICROM =>
+    
+                   if qnice_dev_addr_i(27 downto 12) /= x"FFFF" then
+    
+                      -- ROM payload byte written.
+                      if qnice_dev_we_i = '1' then
+                         rom_written_qnice <= '1';
+                         rom_csr_written_qnice <= '0';
+                      end if;
+    
+                   else
+    
+                      -- Manual loader writes CSR information after the
+                      -- ROM file itself has been transferred.
+                      if qnice_dev_we_i = '1' and
+                         rom_written_qnice = '1' then
+    
+                         rom_csr_written_qnice <= '1';
+    
+                      -- Only accept the subsequent CSR read as a completed
+                      -- manual ROM load if we saw both phases.
+                      elsif qnice_dev_we_i = '0' and
+                            rom_written_qnice = '1' and
+                            rom_csr_written_qnice = '1' then
+    
+                         rom_loaded_toggle     <= not rom_loaded_toggle;
+                         rom_written_qnice     <= '0';
+                         rom_csr_written_qnice <= '0';
+    
+                      end if;
+    
+                   end if;
+    
+                when others =>
+                   null;
+    
+             end case;
+    
+          end if;
+       end if;
+    end process;
+    
+    rom_load_cdc : process(main_clk)
+    begin
+       if rising_edge(main_clk) then
+    
+          rom_loaded_sync1      <= rom_loaded_toggle;
+          rom_loaded_sync2      <= rom_loaded_sync1;
+          rom_loaded_sync2_prev <= rom_loaded_sync2;
+    
+          if rom_loaded_sync2 /= rom_loaded_sync2_prev then
+             rom_loaded_reset <= '1';
+          else
+             rom_loaded_reset <= '0';
+          end if;
+    
+       end if;
+    end process;
     
     atari_osrom : entity work.dualport_2clk_ram
        generic map (
