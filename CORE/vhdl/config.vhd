@@ -329,7 +329,7 @@ constant OPTM_S_SAVING     : string := "<Saving>";          -- the internal writ
 --             Do use a lower case \n. If you forget one of them or if you use upper case, you will run into undefined behavior.
 --          2. Start each line that contains an actual menu item (multi- or single-select) with a Space character,
 --             otherwise you will experience visual glitches.
-constant OPTM_SIZE         : natural := 40;  -- amount of items including empty lines:
+constant OPTM_SIZE         : natural := 44;  -- amount of items including empty lines:
                                              -- needs to be equal to the number of lines in OPTM_ITEMS and amount of items in OPTM_GROUPS
                                              -- IMPORTANT: If SAVE_SETTINGS is true and OPTM_SIZE changes: Make sure to re-generate and
                                              -- and re-distribute the config file. You can make a new one using M2M/tools/make_config.sh
@@ -373,11 +373,15 @@ constant OPTM_ITEMS        : string :=
    " System ROM: %s\n"      &
    " Atari System ROM\n"    &
    "\n"                     &
-   " XL/XE OS\n"            &
-   " 400/800 OS-A\n"        &
-   " 400/800 OS-B\n"        &
+   " Machine: XL/XE\n"      &
+   " Machine: 400/800\n"    &
+   "\n"                     &
+   " 400/800 OS: 10K\n"     &
+   " 400/800 OS: 16K\n"     &
+   "\n"                     &
    " Load OS 16K:%s\n"      &
    " Load OS 10K:%s\n"      &
+   " Load BASIC:%s\n"       &
    "\n"                     &
    " Back to main menu\n"   &
    "\n"                     &
@@ -397,10 +401,12 @@ constant OPTM_G_Drive_A           : integer := 2;
 constant OPTM_G_CRT               : integer := 3;
 constant OPTM_G_Zoom              : integer := 4;
 constant OPTM_G_Audio             : integer := 5;
-constant OPTM_G_SYSTEM_ROM        : integer := 6;
-constant OPTM_G_LOAD_ATARI_OS_16K : integer := 7;
-constant OPTM_G_LOAD_ATARI_OS_10K : integer := 8;
-constant OPTM_G_KEYBOARD          : integer := 9;
+constant OPTM_G_MACHINE           : integer := 6;
+constant OPTM_G_OS800_TYPE        : integer := 7;
+constant OPTM_G_LOAD_ATARI_16K    : integer := 8;
+constant OPTM_G_LOAD_ATARI_10K    : integer := 9;
+constant OPTM_G_KEYBOARD          : integer := 10;
+constant OPTM_G_LOAD_ATARI_BASIC  : integer := 11;
 
 -- !!! DO NOT TOUCH !!!
 type OPTM_GTYPE is array (0 to OPTM_SIZE - 1) of integer range 0 to 2**OPTM_GTC- 1;
@@ -442,18 +448,28 @@ constant OPTM_GROUPS       : OPTM_GTYPE := ( OPTM_G_TEXT + OPTM_G_HEADLINE,     
                                              OPTM_G_SUBMENU,
                                              OPTM_G_HEADLINE,
                                              OPTM_G_LINE,
-                                             OPTM_G_SYSTEM_ROM + OPTM_G_STDSEL,
-                                             OPTM_G_SYSTEM_ROM,
-                                             OPTM_G_SYSTEM_ROM,
-                                             OPTM_G_LOAD_ATARI_OS_16K + OPTM_G_LOAD_ROM,
-                                             OPTM_G_LOAD_ATARI_OS_10K + OPTM_G_LOAD_ROM,
+                                            
+                                             OPTM_G_MACHINE + OPTM_G_STDSEL,      -- Machine: XL/XE
+                                             OPTM_G_MACHINE,                      -- Machine: 400/800
+                                            
+                                             OPTM_G_LINE,
+                                            
+                                             OPTM_G_OS800_TYPE + OPTM_G_STDSEL,   -- 400/800 OS: 10K
+                                             OPTM_G_OS800_TYPE,                   -- 400/800 OS: 16K
+                                            
+                                             OPTM_G_LINE,
+                                            
+                                             OPTM_G_LOAD_ATARI_16K   + OPTM_G_LOAD_ROM,
+                                             OPTM_G_LOAD_ATARI_10K   + OPTM_G_LOAD_ROM,
+                                             OPTM_G_LOAD_ATARI_BASIC + OPTM_G_LOAD_ROM,
+                                            
                                              OPTM_G_LINE,
                                              OPTM_G_CLOSE + OPTM_G_SUBMENU,
                                              OPTM_G_LINE,
-
-                                             OPTM_G_KEYBOARD,                  -- Atari
-                                             OPTM_G_KEYBOARD + OPTM_G_STDSEL,  -- MEGA65 default
-                                             
+                                            
+                                             OPTM_G_KEYBOARD,                     -- Atari
+                                             OPTM_G_KEYBOARD + OPTM_G_STDSEL,     -- MEGA65
+                                            
                                              OPTM_G_LINE,
                                              OPTM_G_CLOSE
                                            );

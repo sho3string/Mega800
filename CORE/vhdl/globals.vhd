@@ -33,16 +33,18 @@ constant C_MENU_CRT_EMULATION  : natural := 21;
 constant C_MENU_HDMI_ZOOM      : natural := 22;
 constant C_MENU_IMPROVE_AUDIO  : natural := 23;
 
-constant C_MENU_OS_XLXE        : natural := 28;
-constant C_MENU_OS_OSA         : natural := 29;
-constant C_MENU_OS_OSB         : natural := 30;
+constant C_MENU_MACHINE_XLXE   : natural := 28;
+constant C_MENU_MACHINE_800    : natural := 29;
 
--- ROM loader menu entries
-constant C_MENU_OS_LOAD_16K    : natural := 31;
-constant C_MENU_OS_LOAD_10K    : natural := 32;
+constant C_MENU_OS800_10K      : natural := 31;
+constant C_MENU_OS800_16K      : natural := 32;
 
-constant C_MENU_KBD_ATARI      : natural := 36;
-constant C_MENU_KBD_MEGA65     : natural := 37;
+constant C_MENU_OS_LOAD_16K    : natural := 34;
+constant C_MENU_OS_LOAD_10K    : natural := 35;
+constant C_MENU_BASIC_LOAD     : natural := 36;
+
+constant C_MENU_KBD_ATARI      : natural := 40;
+constant C_MENU_KBD_MEGA65     : natural := 41;
 
 ----------------------------------------------------------------------------------------------------------
 -- QNICE Firmware
@@ -192,20 +194,39 @@ constant C_CRTROMS_MAN : crtrom_buf_array := (
 --               b) Don't forget to zero-terminate each of your substrings of C_CRTROMS_AUTO_NAMES by adding "& ENDSTR;"
 --               c) Don't forget to finish the C_CRTROMS_AUTO array with x"EEEE"
 
--- Atari core specific ROMs
 --constant ATARI_OS_ROM           : string := "/atari800/a8diag1-6.rom" & ENDSTR;
-constant ATARI_OS_ROM           : string := "/atari800/boot0.rom" & ENDSTR;
+-- Atari core specific ROMs
+constant ATARI_OS_ROM_16K       : string := "/atari800/boot0.rom" & ENDSTR;
 constant ATARI_BASIC_ROM        : string := "/atari800/boot1.rom" & ENDSTR;
-constant ATARI_OS_ROM_START     : std_logic_vector(15 downto 0) := x"0000";
-constant ATARI_BASIC_ROM_START  : std_logic_vector(15 downto 0) := ATARI_OS_ROM_START + ATARI_OS_ROM'length;
+constant ATARI_OS_ROM_10K       : string := "/atari800/boot2.rom" & ENDSTR;
+
+constant ATARI_OS_ROM_16K_START : std_logic_vector(15 downto 0) := x"0000";
+
+constant ATARI_BASIC_ROM_START  : std_logic_vector(15 downto 0) :=
+   ATARI_OS_ROM_16K_START + ATARI_OS_ROM_16K'length;
+
+constant ATARI_OS_ROM_10K_START : std_logic_vector(15 downto 0) :=
+   ATARI_BASIC_ROM_START + ATARI_BASIC_ROM'length;
 
 
 -- M2M framework constants
-constant C_CRTROMS_AUTO_NUM     : natural := 2;                                       -- Amount of automatically loadable ROMs and carts, maximum is 16
-constant C_CRTROMS_AUTO_NAMES   : string := ATARI_OS_ROM & ATARI_BASIC_ROM;
+constant C_CRTROMS_AUTO_NUM : natural := 3;
+
+constant C_CRTROMS_AUTO_NAMES : string :=
+   ATARI_OS_ROM_16K &
+   ATARI_BASIC_ROM  &
+   ATARI_OS_ROM_10K;
+
 constant C_CRTROMS_AUTO : crtrom_buf_array := (
-   C_CRTROMTYPE_DEVICE, C_DEV_ATARI_OSROM_16K, C_CRTROMTYPE_OPTIONAL, ATARI_OS_ROM_START,
-   C_CRTROMTYPE_DEVICE, C_DEV_ATARI_BASICROM,  C_CRTROMTYPE_OPTIONAL, ATARI_BASIC_ROM_START,
+   C_CRTROMTYPE_DEVICE, C_DEV_ATARI_OSROM_16K,
+   C_CRTROMTYPE_OPTIONAL, ATARI_OS_ROM_16K_START,
+
+   C_CRTROMTYPE_DEVICE, C_DEV_ATARI_BASICROM,
+   C_CRTROMTYPE_OPTIONAL, ATARI_BASIC_ROM_START,
+
+   C_CRTROMTYPE_DEVICE, C_DEV_ATARI_OSROM_10K,
+   C_CRTROMTYPE_OPTIONAL, ATARI_OS_ROM_10K_START,
+
    x"EEEE"
 );
 

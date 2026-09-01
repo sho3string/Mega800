@@ -329,8 +329,8 @@ begin
       cpu_speed               => "000001",
       RAM_SIZE                => "000",
 
-      OS_MODE_800             => '0',--os_mode_800,
-      OS_800_16K              => '0',--os_800_16k,
+      OS_MODE_800             => atari_os_i(0),
+      OS_800_16K              => atari_os_i(1),
       PBI_MODE                => '0',
       XEX_LOADER_MODE         => '0',
 

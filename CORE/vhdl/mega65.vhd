@@ -280,13 +280,18 @@ signal qnice_osrom_addr        : std_logic_vector(13 downto 0);
 signal qnice_osrom_data_to     : std_logic_vector(7 downto 0);
 signal qnice_osrom_data_from   : std_logic_vector(7 downto 0);
 
+signal qnice_osrom10_we        : std_logic;
+signal qnice_osrom10_addr      : std_logic_vector(13 downto 0);
+signal qnice_osrom10_data_to   : std_logic_vector(7 downto 0);
+signal qnice_osrom10_data_from : std_logic_vector(7 downto 0);
+
+signal main_osrom16_data       : std_logic_vector(7 downto 0);
+signal main_osrom10_data       : std_logic_vector(7 downto 0);
+
 signal qnice_basicrom_we       : std_logic;
 signal qnice_basicrom_addr     : std_logic_vector(12 downto 0);
 signal qnice_basicrom_data_to  : std_logic_vector(7 downto 0);
 signal qnice_basicrom_data_from: std_logic_vector(7 downto 0);
-
-signal atari_osrom_addr        : std_logic_vector(13 downto 0);
-signal atari_osrom_data        : std_logic_vector(7 downto 0);
 
 signal main_osrom_addr         : std_logic_vector(13 downto 0);
 signal main_osrom_data         : std_logic_vector(7 downto 0);
@@ -304,6 +309,12 @@ signal rom_loaded_reset        : std_logic := '0';
 
 signal main_reset_core_int     : std_logic;
 signal rom_csr_written_qnice   : std_logic := '0';
+
+signal machine_mode_prev       : std_logic := '0';
+signal machine_mode_reset      : std_logic := '0';
+
+
+
 
 begin
 
@@ -391,7 +402,9 @@ begin
    video_vs_o       <= video_vs;
    video_hs_o       <= video_hs;
    video_hblank_o   <= video_hblank;
-   video_vblank_o   <= video_vblank;      
+   video_vblank_o   <= video_vblank;
+   
+   main_osrom_data <= main_osrom10_data when atari_os_rom(0) = '1' and atari_os_rom(1) = '0' else main_osrom16_data; 
 
 
    ---------------------------------------------------------------------------------------------
@@ -403,8 +416,8 @@ begin
    main_power_led_o     <= '1';
    main_power_led_col_o <= x"0000FF" when main_reset_m2m_i else x"00FF00";
    
-   main_reset_core_int  <= main_reset_core_i or rom_loaded_reset;
-
+   main_reset_core_int <= main_reset_core_i or rom_loaded_reset or machine_mode_reset;
+   
    -- main.vhd contains the actual MiSTer core
    i_main : entity work.main
       generic map (
@@ -470,10 +483,8 @@ begin
 
       ); -- i_main
       
-    atari_os_rom <= "00" when main_osm_control_i(C_MENU_OS_XLXE) else
-                 "01" when main_osm_control_i(C_MENU_OS_OSA) else
-                 "10" when main_osm_control_i(C_MENU_OS_OSB) else
-                 "00";
+      atari_os_rom(0) <= main_osm_control_i(C_MENU_MACHINE_800);
+      atari_os_rom(1) <= main_osm_control_i(C_MENU_OS800_16K);
 
     -- Atari800	Resolution: 356x240	Horizontal: 15.7	Vertical:50.3	Pixel Clock: 7.16
     -- Equivalent to MiSTer:
@@ -579,6 +590,10 @@ begin
        qnice_osrom_addr    <= qnice_dev_addr_i(13 downto 0);
        qnice_osrom_data_to <= qnice_dev_data_i(7 downto 0);
        
+       qnice_osrom10_we      <= '0';
+       qnice_osrom10_addr    <= (others => '0');
+       qnice_osrom10_data_to <= (others => '0');
+       
        qnice_basicrom_we      <= '0';
        qnice_basicrom_addr    <= qnice_dev_addr_i(12 downto 0);
        qnice_basicrom_data_to <= qnice_dev_data_i(7 downto 0);
@@ -599,14 +614,10 @@ begin
            -- 400/800 10K OS:
            -- file $0000-$27FF maps to BRAM $1800-$3FFF
            when C_DEV_ATARI_OSROM_10K =>
-              qnice_osrom_addr       <= std_logic_vector(
-                                           unsigned(qnice_dev_addr_i(13 downto 0)) +
-                                           to_unsigned(16#1800#, 14)
-                                        );
-              qnice_osrom_we         <= qnice_dev_we_i and not qnice_csr_window;
-              qnice_dev_data_o       <= CRTROM_CSR_PT_OK when qnice_csr_window else
-                                        x"00" & qnice_osrom_data_from;
-              qnice_osrom_data_to    <= qnice_dev_data_i(7 downto 0);
+               qnice_osrom10_addr <= std_logic_vector(unsigned(qnice_dev_addr_i(13 downto 0)) +to_unsigned(16#1800#, 14));
+               qnice_osrom10_we <= qnice_dev_we_i and not qnice_csr_window;
+               qnice_dev_data_o <= CRTROM_CSR_PT_OK when qnice_csr_window else x"00" & qnice_osrom10_data_from;
+               qnice_osrom10_data_to <= qnice_dev_data_i(7 downto 0);
         
            when C_DEV_ATARI_BASICROM =>
               qnice_basicrom_addr       <= qnice_dev_addr_i(12 downto 0);
@@ -695,7 +706,25 @@ begin
        end if;
     end process;
     
-    atari_osrom : entity work.dualport_2clk_ram
+    machine_mode_change : process(main_clk)
+    begin
+       if rising_edge(main_clk) then
+          if main_rst = '1' then
+             machine_mode_prev  <= atari_os_rom(0);
+             machine_mode_reset <= '0';
+          else
+             machine_mode_prev <= atari_os_rom(0);
+    
+             if atari_os_rom(0) /= machine_mode_prev then
+                machine_mode_reset <= '1';
+             else
+                machine_mode_reset <= '0';
+             end if;
+          end if;
+       end if;
+    end process;
+    
+    atari_osrom16 : entity work.dualport_2clk_ram
        generic map (
           ADDR_WIDTH => 14,
           DATA_WIDTH => 8,
@@ -708,7 +737,7 @@ begin
           address_a  => main_osrom_addr,
           data_a     => (others => '0'),
           wren_a     => '0',
-          q_a        => main_osrom_data,
+          q_a        => main_osrom16_data,
     
           -- QNICE loader side
           clock_b    => qnice_clk_i,
@@ -716,6 +745,27 @@ begin
           data_b     => qnice_osrom_data_to,
           wren_b     => qnice_osrom_we,
           q_b        => qnice_osrom_data_from
+   );
+   
+   atari_osrom10 : entity work.dualport_2clk_ram
+   generic map (
+      ADDR_WIDTH => 14,
+      DATA_WIDTH => 8,
+      FALLING_A  => false,
+      FALLING_B  => true
+   )
+   port map (
+          clock_a    => main_clk,
+          address_a  => main_osrom_addr,
+          data_a     => (others => '0'),
+          wren_a     => '0',
+          q_a        => main_osrom10_data,
+    
+          clock_b    => qnice_clk_i,
+          address_b  => qnice_osrom10_addr,
+          data_b     => qnice_osrom10_data_to,
+          wren_b     => qnice_osrom10_we,
+          q_b        => qnice_osrom10_data_from
    );
    
    atari_basicrom : entity work.dualport_2clk_ram
