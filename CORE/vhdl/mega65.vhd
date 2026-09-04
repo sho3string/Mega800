@@ -313,8 +313,39 @@ signal rom_csr_written_qnice   : std_logic := '0';
 signal machine_mode_prev       : std_logic := '0';
 signal machine_mode_reset      : std_logic := '0';
 
+-- QNICE <-> Atari DMA bridge
+signal qnice_xex_ce            : std_logic;
+signal qnice_xex_we            : std_logic;
+signal qnice_xex_data          : std_logic_vector(15 downto 0);
+signal qnice_xex_wait          : std_logic;
 
+signal atari_dma_addr_qnice       : std_logic_vector(25 downto 0);
+signal atari_dma_data_qnice       : std_logic_vector(7 downto 0);
+signal atari_dma_read_qnice       : std_logic;
+signal atari_dma_req_toggle_qnice : std_logic;
 
+signal atari_dma_ack_toggle_main  : std_logic := '0';
+signal atari_dma_readback_main    : std_logic_vector(7 downto 0) := (others => '0');
+signal atari_dma_req_sync1        : std_logic := '0';
+signal atari_dma_req_sync2        : std_logic := '0';
+signal atari_dma_req_seen         : std_logic := '0';
+signal atari_dma_req_main         : std_logic := '0';
+
+signal atari_dma_data_from_main   : std_logic_vector(7 downto 0);
+signal atari_dma_ready_main       : std_logic;
+
+signal xex_loader_mode_qnice      : std_logic;
+signal xex_loader_mode_sync1      : std_logic := '0';
+signal xex_loader_mode_main       : std_logic := '0';
+
+signal xex_core_reset_qnice       : std_logic := '0';
+signal xex_core_pause_qnice       : std_logic := '0';
+
+signal xex_core_reset_sync1       : std_logic := '0';
+signal xex_core_reset_main        : std_logic := '0';
+
+signal xex_core_pause_sync1       : std_logic := '0';
+signal xex_core_pause_main        : std_logic := '0';
 
 begin
 
@@ -416,7 +447,10 @@ begin
    main_power_led_o     <= '1';
    main_power_led_col_o <= x"0000FF" when main_reset_m2m_i else x"00FF00";
    
-   main_reset_core_int <= main_reset_core_i or rom_loaded_reset or machine_mode_reset;
+   main_reset_core_int <=
+   main_reset_core_i or
+   rom_loaded_reset or
+   machine_mode_reset;
    
    -- main.vhd contains the actual MiSTer core
    i_main : entity work.main
@@ -429,8 +463,8 @@ begin
          clk_video_i          => video_clk,
          reset_soft_i         => main_reset_core_int,
          reset_hard_i         => main_reset_m2m_i,
-         pause_i              => main_pause_core_i,
-
+         pause_i              => main_pause_core_i or xex_core_pause_main,
+         
          atari_os_i           => atari_os_rom,
          
          atari_osrom_addr_o   => main_osrom_addr,
@@ -439,6 +473,20 @@ begin
          atari_basicrom_addr_o => main_basicrom_addr,
          atari_basicrom_data_i => main_basicrom_data,
          
+         dma_addr_i             => atari_dma_addr_qnice,
+         dma_req_i              => atari_dma_req_main,
+         dma_read_enable_i      => atari_dma_read_qnice,
+         dma_data_i             => atari_dma_data_qnice,
+         dma_data_o             => atari_dma_data_from_main,
+         dma_ready_o            => atari_dma_ready_main,
+
+         xex_loader_mode_i      => xex_loader_mode_main,
+         
+         
+         -- Atari internal reset request. This stays inside atari800top and
+         -- therefore leaves the QNICE/HPS DMA bridge alive.
+         xex_reset_i            => xex_core_reset_main,
+
          clk_main_speed_i     => CORE_CLK_SPEED,
 
          -- Video output
@@ -517,6 +565,82 @@ begin
        end if;
     end process;
     
+      atari_dma_main_proc : process(main_clk)
+       begin
+          if rising_edge(main_clk) then
+    
+             ------------------------------------------------------------------
+             -- Synchronize QNICE -> main clock domain
+             ------------------------------------------------------------------
+    
+             atari_dma_req_sync1 <= atari_dma_req_toggle_qnice;
+             atari_dma_req_sync2 <= atari_dma_req_sync1;
+             xex_loader_mode_sync1 <= xex_loader_mode_qnice;
+             xex_loader_mode_main  <= xex_loader_mode_sync1;
+             xex_core_reset_sync1 <= xex_core_reset_qnice;
+             xex_core_reset_main  <= xex_core_reset_sync1;
+             xex_core_pause_sync1 <= xex_core_pause_qnice;
+             xex_core_pause_main  <= xex_core_pause_sync1;
+    
+    
+             ------------------------------------------------------------------
+             -- Main clock reset
+             ------------------------------------------------------------------
+    
+             if main_rst = '1' then
+    
+                atari_dma_req_seen        <= atari_dma_req_sync2;
+                atari_dma_req_main        <= '0';
+                atari_dma_ack_toggle_main <= atari_dma_req_sync2;    
+                atari_dma_readback_main   <= (others => '0');
+                xex_loader_mode_sync1 <= '0';
+                xex_loader_mode_main  <= '0';
+                xex_core_reset_sync1  <= '0';
+                xex_core_reset_main   <= '0';
+                xex_core_pause_sync1  <= '0';
+                xex_core_pause_main   <= '0';
+    
+    
+             else
+    
+                ------------------------------------------------------------------
+                -- New DMA transaction from QNICE/XEX loader.
+                --
+                -- The toggle crossing means each change represents exactly one
+                -- new transaction.
+                ------------------------------------------------------------------
+    
+                if atari_dma_req_main = '0' and
+                   atari_dma_req_sync2 /= atari_dma_req_seen then
+    
+                   atari_dma_req_seen <= atari_dma_req_sync2;
+                   atari_dma_req_main <= '1';
+    
+                end if;
+    
+    
+                ------------------------------------------------------------------
+                -- Atari address decoder completed the DMA transaction.
+                ------------------------------------------------------------------
+    
+                if atari_dma_req_main = '1' and
+                   atari_dma_ready_main = '1' then
+    
+                   atari_dma_readback_main <= atari_dma_data_from_main;
+                   atari_dma_req_main <= '0';
+    
+                   -- Toggle ACK back to the QNICE domain.
+                   atari_dma_ack_toggle_main <=
+                      not atari_dma_ack_toggle_main;
+    
+                end if;
+    
+             end if;
+    
+          end if;
+   end process;
+       
+       
     
    ---------------------------------------------------------------------------------------------
    -- Audio and video settings (QNICE clock domain)
@@ -598,6 +722,9 @@ begin
        qnice_basicrom_addr    <= qnice_dev_addr_i(12 downto 0);
        qnice_basicrom_data_to <= qnice_dev_data_i(7 downto 0);
        
+       qnice_xex_ce <= '0';
+       qnice_xex_we <= '0';
+       
        qnice_csr_window := '1' when qnice_dev_addr_i(27 downto 12) = x"FFFF" else '0';
 
     
@@ -625,6 +752,12 @@ begin
               qnice_dev_data_o          <= CRTROM_CSR_PT_OK when qnice_csr_window else
                                            x"00" & qnice_basicrom_data_from;
               qnice_basicrom_data_to    <= qnice_dev_data_i(7 downto 0);
+              
+           when C_DEV_ATARI_DMA =>
+               qnice_xex_ce       <= qnice_dev_ce_i;
+               qnice_xex_we       <= qnice_dev_we_i;
+               qnice_dev_data_o   <= qnice_xex_data;
+               qnice_dev_wait_o   <= qnice_xex_wait;
         
            when others =>
               null;
@@ -790,6 +923,33 @@ begin
           wren_b     => qnice_basicrom_we,
           q_b        => qnice_basicrom_data_from
    );
+   
+   i_xex_loader : entity work.xex_loader
+   port map (
+      qnice_clk_i       => qnice_clk_i,
+      qnice_rst_i       => qnice_rst_i,
+      qnice_addr_i      => qnice_dev_addr_i,
+      qnice_data_i      => qnice_dev_data_i,
+      qnice_ce_i        => qnice_xex_ce,
+      qnice_we_i        => qnice_xex_we,
+      qnice_data_o      => qnice_xex_data,
+      qnice_wait_o      => qnice_xex_wait,
+
+      dma_addr_o        => atari_dma_addr_qnice,
+      dma_data_o        => atari_dma_data_qnice,
+      dma_read_o        => atari_dma_read_qnice,
+      dma_req_toggle_o  => atari_dma_req_toggle_qnice,
+
+      dma_ack_toggle_i  => atari_dma_ack_toggle_main,
+      dma_readback_i    => atari_dma_readback_main,
+
+      xex_loader_mode_o => xex_loader_mode_qnice,
+      
+      core_reset_o      => xex_core_reset_qnice,
+      core_pause_o      => xex_core_pause_qnice
+   );
+   
+ 
 
    ---------------------------------------------------------------------------------------------
    -- Dual Clocks

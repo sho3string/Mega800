@@ -329,7 +329,7 @@ constant OPTM_S_SAVING     : string := "<Saving>";          -- the internal writ
 --             Do use a lower case \n. If you forget one of them or if you use upper case, you will run into undefined behavior.
 --          2. Start each line that contains an actual menu item (multi- or single-select) with a Space character,
 --             otherwise you will experience visual glitches.
-constant OPTM_SIZE         : natural := 44;  -- amount of items including empty lines:
+constant OPTM_SIZE         : natural := 45;  -- amount of items including empty lines:
                                              -- needs to be equal to the number of lines in OPTM_ITEMS and amount of items in OPTM_GROUPS
                                              -- IMPORTANT: If SAVE_SETTINGS is true and OPTM_SIZE changes: Make sure to re-generate and
                                              -- and re-distribute the config file. You can make a new one using M2M/tools/make_config.sh
@@ -337,19 +337,19 @@ constant OPTM_SIZE         : natural := 44;  -- amount of items including empty 
 -- Net size of the Options menu on the screen in characters (excluding the frame, which is hardcoded to two characters)
 -- Without submenus: Use OPTM_SIZE as height, otherwise count how large the actually visible main menu is.
 constant OPTM_DX           : natural := 23;
-constant OPTM_DY           : natural := 20;
+constant OPTM_DY           : natural := 21;
 
-constant OPTM_ITEMS        : string :=
-
+constant OPTM_ITEMS : string :=
    " Mega800 \n"            &
    "\n"                     &
-   
+
    " Drive A:%s\n"          &
+   " Load XEX:%s\n"         &
    "\n"                     &
- 
+
    " Demo Headline B\n"     &
    "\n"                     &
-   " HDMI: %s\n"            &    -- HDMI submenu
+   " HDMI: %s\n"            &
    " HDMI Settings\n"       &
    "\n"                     &
    " 720p 50 Hz 16:9\n"     &
@@ -361,7 +361,7 @@ constant OPTM_ITEMS        : string :=
    " 800x600 60 Hz\n"       &
    "\n"                     &
    " Back to main menu\n"   &
-   
+
    "\n"                     &
    " Another Headline\n"    &
    "\n"                     &
@@ -369,7 +369,7 @@ constant OPTM_ITEMS        : string :=
    " HDMI: Zoom-in\n"       &
    " Audio improvements\n"  &
    "\n"                     &
-   
+
    " System ROM: %s\n"      &
    " Atari System ROM\n"    &
    "\n"                     &
@@ -407,6 +407,7 @@ constant OPTM_G_LOAD_ATARI_16K    : integer := 8;
 constant OPTM_G_LOAD_ATARI_10K    : integer := 9;
 constant OPTM_G_KEYBOARD          : integer := 10;
 constant OPTM_G_LOAD_ATARI_BASIC  : integer := 11;
+constant OPTM_G_LOAD_ATARI_XEX    : integer := 12;
 
 -- !!! DO NOT TOUCH !!!
 type OPTM_GTYPE is array (0 to OPTM_SIZE - 1) of integer range 0 to 2**OPTM_GTC- 1;
@@ -414,65 +415,69 @@ type OPTM_GTYPE is array (0 to OPTM_SIZE - 1) of integer range 0 to 2**OPTM_GTC-
 -- define your menu groups: which menu items are belonging together to form a group?
 -- where are separator lines? which items should be selected by default?
 -- make sure that you have exactly the same amount of entries here than in OPTM_ITEMS and defined by OPTM_SIZE
-constant OPTM_GROUPS       : OPTM_GTYPE := ( OPTM_G_TEXT + OPTM_G_HEADLINE,            -- Headline "Demo Headline A"
-                                             OPTM_G_LINE,                              -- Line
-                                             
- 
-                                             OPTM_G_Drive_A + OPTM_G_MOUNT_DRV + OPTM_G_START,        -- Drive A
-                                             OPTM_G_LINE,                              -- Line
-                                             
-                                             
-                                             OPTM_G_TEXT + OPTM_G_HEADLINE,            -- Headline "Demo Headline B"
-                                             OPTM_G_LINE,                              -- Line
-                                             OPTM_G_SUBMENU,                           -- HDMI submenu block: START: "HDMI: %s"
-                                             OPTM_G_TEXT + OPTM_G_HEADLINE,            -- Headline "HDMI Settings"
-                                             OPTM_G_LINE,                              -- Line
-                                             OPTM_G_HDMI + OPTM_G_STDSEL,              -- 720p 50 Hz 16:9, selected by default
-                                             OPTM_G_HDMI,                              -- 720p 60 Hz 16:9
-                                             OPTM_G_HDMI,                              -- 576p 50 Hz 4:3
-                                             OPTM_G_HDMI,                              -- 576p 50 Hz 5:4
-                                             OPTM_G_HDMI,                              -- 640x480 60 Hz
-                                             OPTM_G_HDMI,                              -- 720x480 59.94 Hz
-                                             OPTM_G_HDMI,                              -- 600p 60 Hz
-                                             OPTM_G_LINE,                              -- open
-                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,            -- Close submenu / back to main menu
-                                             OPTM_G_LINE,
-
-                                             OPTM_G_TEXT + OPTM_G_HEADLINE,            -- Headline "Another Headline"
-                                             OPTM_G_LINE,                              -- Line
-                                             OPTM_G_CRT     + OPTM_G_SINGLESEL+ OPTM_G_STDSEL, -- On/Off toggle ("Single Select")
-                                             OPTM_G_Zoom    + OPTM_G_SINGLESEL,        -- On/Off toggle ("Single Select")
-                                             OPTM_G_Audio   + OPTM_G_SINGLESEL,        -- On/Off toggle ("Single Select")
-                                             OPTM_G_LINE,                              -- Line
-                                             
-                                             OPTM_G_SUBMENU,
-                                             OPTM_G_HEADLINE,
-                                             OPTM_G_LINE,
+constant OPTM_GROUPS       : OPTM_GTYPE := (   OPTM_G_TEXT + OPTM_G_HEADLINE,
+                                               OPTM_G_LINE,
                                             
-                                             OPTM_G_MACHINE + OPTM_G_STDSEL,      -- Machine: XL/XE
-                                             OPTM_G_MACHINE,                      -- Machine: 400/800
+                                               OPTM_G_Drive_A + OPTM_G_MOUNT_DRV + OPTM_G_START,
+                                               OPTM_G_LOAD_ATARI_XEX + OPTM_G_LOAD_ROM,
+                                               OPTM_G_LINE,
                                             
-                                             OPTM_G_LINE,
+                                               OPTM_G_TEXT + OPTM_G_HEADLINE,
+                                               OPTM_G_LINE,
                                             
-                                             OPTM_G_OS800_TYPE + OPTM_G_STDSEL,   -- 400/800 OS: 10K
-                                             OPTM_G_OS800_TYPE,                   -- 400/800 OS: 16K
+                                               OPTM_G_SUBMENU,
+                                               OPTM_G_TEXT + OPTM_G_HEADLINE,
+                                               OPTM_G_LINE,
                                             
-                                             OPTM_G_LINE,
+                                               OPTM_G_HDMI + OPTM_G_STDSEL,
+                                               OPTM_G_HDMI,
+                                               OPTM_G_HDMI,
+                                               OPTM_G_HDMI,
+                                               OPTM_G_HDMI,
+                                               OPTM_G_HDMI,
+                                               OPTM_G_HDMI,
                                             
-                                             OPTM_G_LOAD_ATARI_16K   + OPTM_G_LOAD_ROM,
-                                             OPTM_G_LOAD_ATARI_10K   + OPTM_G_LOAD_ROM,
-                                             OPTM_G_LOAD_ATARI_BASIC + OPTM_G_LOAD_ROM,
+                                               OPTM_G_LINE,
+                                               OPTM_G_CLOSE + OPTM_G_SUBMENU,
+                                               OPTM_G_LINE,
                                             
-                                             OPTM_G_LINE,
-                                             OPTM_G_CLOSE + OPTM_G_SUBMENU,
-                                             OPTM_G_LINE,
+                                               OPTM_G_TEXT + OPTM_G_HEADLINE,
+                                               OPTM_G_LINE,
                                             
-                                             OPTM_G_KEYBOARD,                     -- Atari
-                                             OPTM_G_KEYBOARD + OPTM_G_STDSEL,     -- MEGA65
+                                               OPTM_G_CRT   + OPTM_G_SINGLESEL + OPTM_G_STDSEL,
+                                               OPTM_G_Zoom  + OPTM_G_SINGLESEL,
+                                               OPTM_G_Audio + OPTM_G_SINGLESEL,
                                             
-                                             OPTM_G_LINE,
-                                             OPTM_G_CLOSE
-                                           );
+                                               OPTM_G_LINE,
+                                            
+                                               OPTM_G_SUBMENU,
+                                               OPTM_G_HEADLINE,
+                                               OPTM_G_LINE,
+                                            
+                                               OPTM_G_MACHINE + OPTM_G_STDSEL,
+                                               OPTM_G_MACHINE,
+                                            
+                                               OPTM_G_LINE,
+                                            
+                                               OPTM_G_OS800_TYPE + OPTM_G_STDSEL,
+                                               OPTM_G_OS800_TYPE,
+                                            
+                                               OPTM_G_LINE,
+                                            
+                                               OPTM_G_LOAD_ATARI_16K   + OPTM_G_LOAD_ROM,
+                                               OPTM_G_LOAD_ATARI_10K   + OPTM_G_LOAD_ROM,
+                                               OPTM_G_LOAD_ATARI_BASIC + OPTM_G_LOAD_ROM,
+                                            
+                                               OPTM_G_LINE,
+                                               OPTM_G_CLOSE + OPTM_G_SUBMENU,
+                                               OPTM_G_LINE,
+                                            
+                                               OPTM_G_KEYBOARD,
+                                               OPTM_G_KEYBOARD + OPTM_G_STDSEL,
+                                            
+                                               OPTM_G_LINE,
+                                               OPTM_G_CLOSE
+                                  );
 
 --------------------------------------------------------------------------------------------------------------------
 -- !!! CAUTION: M2M FRAMEWORK CODE !!! DO NOT TOUCH ANYTHING BELOW THIS LINE !!!

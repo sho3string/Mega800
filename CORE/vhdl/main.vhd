@@ -66,7 +66,24 @@ entity main is
       atari_basicrom_addr_o   : out std_logic_vector(12 downto 0);
       atari_basicrom_data_i   : in  std_logic_vector(7 downto 0);
       
-      -- MiSTer core main clock speed:
+      
+      -----------------------------------------------------------------------
+      -- Atari HPS/DMA bridge
+      -----------------------------------------------------------------------
+      dma_addr_i              : in  std_logic_vector(25 downto 0);
+      dma_req_i               : in  std_logic;
+      dma_read_enable_i       : in  std_logic;
+      dma_data_i              : in  std_logic_vector(7 downto 0);
+      dma_data_o              : out std_logic_vector(7 downto 0);
+      dma_ready_o             : out std_logic;
+
+      -----------------------------------------------------------------------
+      -- XEX control
+      -----------------------------------------------------------------------
+      xex_loader_mode_i       : in  std_logic;
+      xex_reset_i             : in  std_logic;
+
+-- MiSTer core main clock speed:
       -- Make sure you pass very exact numbers here, because they are used for avoiding clock drift at derived clocks
       clk_main_speed_i        : in  natural;
 
@@ -215,6 +232,10 @@ begin
     audio_right_o    <= signed(atari_audio_r);
     
     
+    
+   dma_data_o       <= dma_data_in;
+   dma_ready_o      <= dma_ready;
+
     video_vs_o     <= atari_vs;
     video_hs_o     <= atari_hs;
     video_red_o    <= atari_r;
@@ -266,7 +287,7 @@ begin
 
       OSD_PAUSE               => pause_i,
 
-      SET_RESET_IN            => not keyboard_n(m65_f7),
+      SET_RESET_IN            => (not keyboard_n(m65_f7)) or xex_reset_i,
       SET_PAUSE_IN            => not keyboard_n(m65_restore),
       SET_FREEZER_IN          => '0', -- to do
       SET_RESET_RNMI_IN       => '0',
@@ -299,10 +320,10 @@ begin
       TAPE_RESET              => '0',
       TAPE_ACTIVE             => tape_active,
 
-      HPS_DMA_ADDR            => (others => '0'),
-      HPS_DMA_REQ             => '0',
-      HPS_DMA_READ_ENABLE     => '0',
-      HPS_DMA_DATA_OUT        => (others => '0'),
+      HPS_DMA_ADDR            => dma_addr_i,
+      HPS_DMA_REQ             => dma_req_i,
+      HPS_DMA_READ_ENABLE     => dma_read_enable_i,
+      HPS_DMA_DATA_OUT        => dma_data_i,
       HPS_DMA_DATA_IN         => dma_data_in,
       HPS_DMA_READY           => dma_ready,
 
@@ -332,7 +353,7 @@ begin
       OS_MODE_800             => atari_os_i(0),
       OS_800_16K              => atari_os_i(1),
       PBI_MODE                => '0',
-      XEX_LOADER_MODE         => '0',
+      XEX_LOADER_MODE         => xex_loader_mode_i,
 
       WARM_RESET_MENU         => '0',
       COLD_RESET_MENU         => '0',

@@ -21,30 +21,26 @@ constant VGA_STD_SYNC : vga_sync_reshaper_cfg_t := C_VGA_SYNC_RESHAPER_OFF;
 constant HDMI_VIEW    : hdmi_view_cfg_t         := C_HDMI_VIEW_LEGACY;
 
 -- Menu items
-constant C_MENU_HDMI_16_9_50   : natural := 9;
-constant C_MENU_HDMI_16_9_60   : natural := 10;
-constant C_MENU_HDMI_4_3_50    : natural := 11;
-constant C_MENU_HDMI_5_4_50    : natural := 12;
-constant C_MENU_HDMI_640_60    : natural := 13;
-constant C_MENU_HDMI_720_5994  : natural := 14;
-constant C_MENU_SVGA_800_60    : natural := 15;
-
-constant C_MENU_CRT_EMULATION  : natural := 21;
-constant C_MENU_HDMI_ZOOM      : natural := 22;
-constant C_MENU_IMPROVE_AUDIO  : natural := 23;
-
-constant C_MENU_MACHINE_XLXE   : natural := 28;
-constant C_MENU_MACHINE_800    : natural := 29;
-
-constant C_MENU_OS800_10K      : natural := 31;
-constant C_MENU_OS800_16K      : natural := 32;
-
-constant C_MENU_OS_LOAD_16K    : natural := 34;
-constant C_MENU_OS_LOAD_10K    : natural := 35;
-constant C_MENU_BASIC_LOAD     : natural := 36;
-
-constant C_MENU_KBD_ATARI      : natural := 40;
-constant C_MENU_KBD_MEGA65     : natural := 41;
+constant C_MENU_XEX_LOAD       : natural := 3;
+constant C_MENU_HDMI_16_9_50   : natural := 10;
+constant C_MENU_HDMI_16_9_60   : natural := 11;
+constant C_MENU_HDMI_4_3_50    : natural := 12;
+constant C_MENU_HDMI_5_4_50    : natural := 13;
+constant C_MENU_HDMI_640_60    : natural := 14;
+constant C_MENU_HDMI_720_5994  : natural := 15;
+constant C_MENU_SVGA_800_60    : natural := 16;
+constant C_MENU_CRT_EMULATION  : natural := 22;
+constant C_MENU_HDMI_ZOOM      : natural := 23;
+constant C_MENU_IMPROVE_AUDIO  : natural := 24;
+constant C_MENU_MACHINE_XLXE   : natural := 29;
+constant C_MENU_MACHINE_800    : natural := 30;
+constant C_MENU_OS800_10K      : natural := 32;
+constant C_MENU_OS800_16K      : natural := 33;
+constant C_MENU_OS_LOAD_16K    : natural := 35;
+constant C_MENU_OS_LOAD_10K    : natural := 36;
+constant C_MENU_BASIC_LOAD     : natural := 37;
+constant C_MENU_KBD_ATARI      : natural := 41;
+constant C_MENU_KBD_MEGA65     : natural := 42;
 
 ----------------------------------------------------------------------------------------------------------
 -- QNICE Firmware
@@ -124,6 +120,8 @@ constant C_DEV_DEMO_VD          : std_logic_vector(15 downto 0) := x"0101";
 constant C_DEV_ATARI_OSROM_16K  : std_logic_vector(15 downto 0) := x"0102";
 constant C_DEV_ATARI_BASICROM   : std_logic_vector(15 downto 0) := x"0103";
 constant C_DEV_ATARI_OSROM_10K  : std_logic_vector(15 downto 0) := x"0104";
+constant C_DEV_ATARI_DMA        : std_logic_vector(15 downto 0) := x"0105";
+
 
 constant C_DEV_DEMO_NOBUFFER    : std_logic_vector(15 downto 0) := x"AAAA";
 
@@ -168,8 +166,9 @@ constant C_CRTROMTYPE_OPTIONAL   : std_logic_vector(15 downto 0) := x"0004";
 --       else it is a 4k window in HyperRAM or in SDRAM
 -- In case we are loading to a QNICE device, then the control and status register is located at the 4k window 0xFFFF.
 -- @TODO: See @TODO for more details about the control and status register
-constant C_CRTROMS_MAN_NUM       : natural := 3;                                       -- amount of manually loadable ROMs and carts; maximum is 16
+constant C_CRTROMS_MAN_NUM : natural := 4;
 constant C_CRTROMS_MAN : crtrom_buf_array := (
+   C_CRTROMTYPE_DEVICE, C_DEV_ATARI_DMA,
    C_CRTROMTYPE_DEVICE, C_DEV_ATARI_OSROM_16K,
    C_CRTROMTYPE_DEVICE, C_DEV_ATARI_OSROM_10K,
    C_CRTROMTYPE_DEVICE, C_DEV_ATARI_BASICROM,

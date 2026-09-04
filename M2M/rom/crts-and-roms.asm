@@ -586,6 +586,20 @@ _HNDLCRTROM_3   MOVE    CRTROM_CSR_PARSEE1, R9  ; retrieve error code
                 RSUB    CRTROM_CSR_R, 1
                 MOVE    R10, R0                 ; R0: error code
                 MOVE    CRTROM_CSR_ERR_STRT, R1 ; R1: ptr. to error string
+
+                ; --- diagnostic: also retrieve the packed diagnostic value
+                ; (segment_index in bits 22..16, xex_start_addr in bits
+                ; 15..0) the parser reported at the moment of the error.
+                ; R8 still holds the CRT/ROM device id here (CRTROM_CSR_R
+                ; leaves R8/R9 unchanged), so its safe to reuse.
+				
+                MOVE    CRTROM_CSR_ADDR_LO, R9
+                RSUB    CRTROM_CSR_R, 1
+                MOVE    R10, R3                 ; R3: START (low 16 bits)
+                MOVE    CRTROM_CSR_ADDR_HI, R9
+                RSUB    CRTROM_CSR_R, 1
+                MOVE    R10, R4                 ; R4: SEG (low 7 bits)
+
                 MOVE    LOG_STR_ROMPRSE, R8     ; log error to serial terminal
                 SYSCALL(puts, 1)
                 MOVE    R0, R8                  ; log error code
@@ -594,7 +608,20 @@ _HNDLCRTROM_3   MOVE    CRTROM_CSR_PARSEE1, R9  ; retrieve error code
                 SYSCALL(puts, 1)
                 MOVE    R1, R8                  ; log error string
                 RSUB    LOG_STR, 1
-                MOVE    R0, R8                  ; return error code and
+
+                ; --- diagnostic: print "SEG=$xxxx START=$xxxx\n"
+                MOVE    LOG_STR_ROMPRSD, R8     ; NEW: "SEG=$"
+                SYSCALL(puts, 1)
+                MOVE    R4, R8
+                SYSCALL(puthex, 1)
+                MOVE    LOG_STR_ROMPRSF, R8     ; NEW: " START=$"
+                SYSCALL(puts, 1)
+                MOVE    R3, R8
+                SYSCALL(puthex, 1)
+                MOVE    LOG_STR_ROMPRSG, R8     ; NEW: "\n"
+                SYSCALL(puts, 1)
+
+                MOVE    R0, R8                  ; log error code and
                 MOVE    R1, R9                  ; error string
 
 _HNDLCRTROM_R   MOVE    R2, R10                 ; R10: unchanged
