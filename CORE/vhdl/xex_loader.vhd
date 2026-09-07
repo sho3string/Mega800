@@ -158,6 +158,17 @@ architecture beh of xex_loader is
       WAIT_NEXT_STATUS_REQ_ST,
       WAIT_NEXT_STATUS_CHECK_ST,
 
+      TAIL_VALIDATE_WORD_LO_ST,
+      TAIL_VALIDATE_WORD_HI_ST,
+      TAIL_VALIDATE_END_LO_ST,
+      TAIL_VALIDATE_END_HI_ST,
+      TAIL_VALIDATE_PAYLOAD_ST,
+
+      TAIL_WAIT_MAGIC_REQ_ST,
+      TAIL_WAIT_MAGIC_CHECK_ST,
+      TAIL_WAIT_STATUS_REQ_ST,
+      TAIL_WAIT_STATUS_CHECK_ST,
+
       EOF_ST,
       EOF_COMPLETE_ST,
 
@@ -205,6 +216,36 @@ architecture beh of xex_loader is
    -- transaction is consumed exactly once.
    signal last_stream_addr  : std_logic_vector(27 downto 0) := (others => '0');
    signal stream_addr_valid : std_logic := '0';
+
+   ---------------------------------------------------------------------------
+   -- Pending stream FIFO
+   --
+   -- While an Atari INIT routine is running, keep accepting QNICE file bytes
+   -- instead of stalling the host stream. If INIT returns, these bytes are
+   -- replayed through the normal parser. If physical EOF arrives while INIT
+   -- never returns, the buffered tail is no longer needed and EOF can finish.
+   ---------------------------------------------------------------------------
+
+   constant C_TAIL_FIFO_DEPTH : natural := 1024;
+
+   type tail_fifo_t is array (0 to C_TAIL_FIFO_DEPTH - 1) of
+      std_logic_vector(7 downto 0);
+
+   signal tail_fifo   : tail_fifo_t;
+   signal tail_wr_ptr : unsigned(9 downto 0) := (others => '0');
+   signal tail_rd_ptr : unsigned(9 downto 0) := (others => '0');
+   signal tail_count  : unsigned(10 downto 0) := (others => '0');
+
+   signal payload_from_fifo : std_logic := '0';
+
+   -- Non-destructive validator for buffered bytes when physical EOF arrives
+   -- while INIT is still running.
+   signal tail_scan_ptr       : unsigned(9 downto 0) := (others => '0');
+   signal tail_scan_left      : unsigned(10 downto 0) := (others => '0');
+   signal tail_scan_lo        : std_logic_vector(7 downto 0) := (others => '0');
+   signal tail_scan_start     : unsigned(15 downto 0) := (others => '0');
+   signal tail_scan_end       : unsigned(15 downto 0) := (others => '0');
+   signal tail_scan_payload   : unsigned(16 downto 0) := (others => '0');
 
 
    ---------------------------------------------------------------------------
@@ -400,6 +441,11 @@ begin
       variable prep_addr_v : unsigned(15 downto 0);
       variable prep_data_v : std_logic_vector(7 downto 0);
 
+      variable live_byte_valid_v : boolean;
+      variable parser_byte_valid_v : boolean;
+      variable parser_byte_fifo_v : boolean;
+      variable parser_byte_v : std_logic_vector(7 downto 0);
+
    begin
 
       if falling_edge(qnice_clk_i) then
@@ -434,6 +480,18 @@ begin
             last_stream_addr  <= (others => '0');
             stream_addr_valid <= '0';
 
+            tail_wr_ptr       <= (others => '0');
+            tail_rd_ptr       <= (others => '0');
+            tail_count        <= (others => '0');
+            payload_from_fifo <= '0';
+
+            tail_scan_ptr     <= (others => '0');
+            tail_scan_left    <= (others => '0');
+            tail_scan_lo      <= (others => '0');
+            tail_scan_start   <= (others => '0');
+            tail_scan_end     <= (others => '0');
+            tail_scan_payload <= (others => '0');
+
             reset_count      <= (others => '0');
             settle_count     <= (others => '0');
             clear_addr       <= (others => '0');
@@ -467,9 +525,34 @@ begin
 
          else
 
-            -- Default to stalling streamed file data.  Individual parser
+            -- Default to stalling streamed file data. Individual parser
             -- states release exactly the transaction they have consumed.
             qnice_wait_reg <= '1';
+
+            -- A live byte is a new non-CSR QNICE write transaction.
+            live_byte_valid_v :=
+               qnice_ce_i = '1' and
+               qnice_csr = '0' and
+               qnice_we_i = '1' and
+               (stream_addr_valid = '0' or
+                qnice_addr_i /= last_stream_addr);
+
+            -- Parser input priority: replay pending FIFO bytes first. Only
+            -- when the FIFO is empty can the parser consume the live stream.
+            parser_byte_valid_v := false;
+            parser_byte_fifo_v  := false;
+            parser_byte_v       := (others => '0');
+
+            if tail_count /= 0 then
+               parser_byte_valid_v := true;
+               parser_byte_fifo_v  := true;
+               parser_byte_v :=
+                  tail_fifo(to_integer(tail_rd_ptr));
+            elsif live_byte_valid_v then
+               parser_byte_valid_v := true;
+               parser_byte_fifo_v  := false;
+               parser_byte_v       := qnice_data_i(7 downto 0);
+            end if;
 
             ----------------------------------------------------------------
             -- Framework explicitly reported an error
@@ -487,6 +570,39 @@ begin
 
 
             else
+
+               ----------------------------------------------------------------
+               -- While Atari INIT code is running, continue accepting the host
+               -- file stream into the pending FIFO. This removes the circular
+               -- dependency where QNICE could not reach physical EOF until INIT
+               -- returned.
+               --
+               -- If the FIFO fills, WAIT naturally remains asserted until the
+               -- Atari returns and the parser starts replaying buffered bytes.
+               ----------------------------------------------------------------
+
+               if (state = WAIT_NEXT_MAGIC_REQ_ST or
+                   state = WAIT_NEXT_MAGIC_CHECK_ST or
+                   state = WAIT_NEXT_STATUS_REQ_ST or
+                   state = WAIT_NEXT_STATUS_CHECK_ST) and
+                  qnice_req_status /= C_CSR_REQ_OK and
+                  live_byte_valid_v and
+                  tail_count < to_unsigned(C_TAIL_FIFO_DEPTH,
+                                           tail_count'length) then
+
+                  tail_fifo(to_integer(tail_wr_ptr)) <= qnice_data_i(7 downto 0);
+                  tail_wr_ptr <= tail_wr_ptr + 1;
+                  tail_count  <= tail_count + 1;
+
+                  stream_count <= stream_count + 1;
+                  last_stream_addr <= qnice_addr_i;
+                  stream_addr_valid <= '1';
+
+                  -- Acknowledge this QNICE byte immediately. It is safely
+                  -- buffered even though the Atari INIT is still running.
+                  qnice_wait_reg <= '0';
+
+               end if;
 
                case state is
 
@@ -514,6 +630,19 @@ begin
                         stream_count      <= (others => '0');
                         last_stream_addr  <= (others => '0');
                         stream_addr_valid <= '0';
+
+                        tail_wr_ptr       <= (others => '0');
+                        tail_rd_ptr       <= (others => '0');
+                        tail_count        <= (others => '0');
+                        payload_from_fifo <= '0';
+
+                        tail_scan_ptr     <= (others => '0');
+                        tail_scan_left    <= (others => '0');
+                        tail_scan_lo      <= (others => '0');
+                        tail_scan_start   <= (others => '0');
+                        tail_scan_end     <= (others => '0');
+                        tail_scan_payload <= (others => '0');
+
                         first_segment <= '1';
                         segment_index <= to_unsigned(1, segment_index'length);
 
@@ -778,22 +907,25 @@ begin
 
                      qnice_resp_status <= C_CSR_RESP_PARSING;
 
-                     if qnice_req_status = C_CSR_REQ_OK then
+                     if parser_byte_valid_v then
+
+                        word_lo <= parser_byte_v;
+
+                        if parser_byte_fifo_v then
+                           tail_rd_ptr <= tail_rd_ptr + 1;
+                           tail_count  <= tail_count - 1;
+                        else
+                           stream_count <= stream_count + 1;
+                           last_stream_addr <= qnice_addr_i;
+                           stream_addr_valid <= '1';
+                           qnice_wait_reg <= '0';
+                        end if;
+
+                        state <= WORD_HI_ST;
+
+                     elsif qnice_req_status = C_CSR_REQ_OK then
 
                         state <= EOF_ST;
-
-                     elsif qnice_ce_i = '1' and
-                           qnice_csr = '0' and
-                           qnice_we_i = '1' and
-                           (stream_addr_valid = '0' or
-                            qnice_addr_i /= last_stream_addr) then
-
-                        word_lo <= qnice_data_i(7 downto 0);
-                        stream_count <= stream_count + 1;
-                        last_stream_addr <= qnice_addr_i;
-                        stream_addr_valid <= '1';
-                        qnice_wait_reg <= '0';
-                        state <= WORD_HI_ST;
 
                      end if;
 
@@ -804,23 +936,20 @@ begin
 
                   when WORD_HI_ST =>
 
-                     if qnice_req_status = C_CSR_REQ_OK then
-
-                        state <= EOF_ST;
-
-                     elsif qnice_ce_i = '1' and
-                           qnice_csr = '0' and
-                           qnice_we_i = '1' and
-                           (stream_addr_valid = '0' or
-                            qnice_addr_i /= last_stream_addr) then
+                     if parser_byte_valid_v then
 
                         word_v(7 downto 0)  := unsigned(word_lo);
-                        word_v(15 downto 8) := unsigned(qnice_data_i(7 downto 0));
+                        word_v(15 downto 8) := unsigned(parser_byte_v);
 
-                        stream_count <= stream_count + 1;
-                        last_stream_addr <= qnice_addr_i;
-                        stream_addr_valid <= '1';
-                        qnice_wait_reg <= '0';
+                        if parser_byte_fifo_v then
+                           tail_rd_ptr <= tail_rd_ptr + 1;
+                           tail_count  <= tail_count - 1;
+                        else
+                           stream_count <= stream_count + 1;
+                           last_stream_addr <= qnice_addr_i;
+                           stream_addr_valid <= '1';
+                           qnice_wait_reg <= '0';
+                        end if;
 
                         if word_v = x"FFFF" then
                            state <= WORD_LO_ST;
@@ -828,6 +957,10 @@ begin
                            xex_start_addr <= word_v;
                            state <= END_LO_ST;
                         end if;
+
+                     elsif qnice_req_status = C_CSR_REQ_OK then
+
+                        state <= EOF_ST;
 
                      end if;
 
@@ -838,22 +971,25 @@ begin
 
                   when END_LO_ST =>
 
-                     if qnice_req_status = C_CSR_REQ_OK then
+                     if parser_byte_valid_v then
+
+                        word_lo <= parser_byte_v;
+
+                        if parser_byte_fifo_v then
+                           tail_rd_ptr <= tail_rd_ptr + 1;
+                           tail_count  <= tail_count - 1;
+                        else
+                           stream_count <= stream_count + 1;
+                           last_stream_addr <= qnice_addr_i;
+                           stream_addr_valid <= '1';
+                           qnice_wait_reg <= '0';
+                        end if;
+
+                        state <= END_HI_ST;
+
+                     elsif qnice_req_status = C_CSR_REQ_OK then
 
                         state <= EOF_ST;
-
-                     elsif qnice_ce_i = '1' and
-                           qnice_csr = '0' and
-                           qnice_we_i = '1' and
-                           (stream_addr_valid = '0' or
-                            qnice_addr_i /= last_stream_addr) then
-
-                        word_lo <= qnice_data_i(7 downto 0);
-                        stream_count <= stream_count + 1;
-                        last_stream_addr <= qnice_addr_i;
-                        stream_addr_valid <= '1';
-                        qnice_wait_reg <= '0';
-                        state <= END_HI_ST;
 
                      end if;
 
@@ -864,23 +1000,20 @@ begin
 
                   when END_HI_ST =>
 
-                     if qnice_req_status = C_CSR_REQ_OK then
-
-                        state <= EOF_ST;
-
-                     elsif qnice_ce_i = '1' and
-                           qnice_csr = '0' and
-                           qnice_we_i = '1' and
-                           (stream_addr_valid = '0' or
-                            qnice_addr_i /= last_stream_addr) then
+                     if parser_byte_valid_v then
 
                         word_v(7 downto 0)  := unsigned(word_lo);
-                        word_v(15 downto 8) := unsigned(qnice_data_i(7 downto 0));
+                        word_v(15 downto 8) := unsigned(parser_byte_v);
 
-                        stream_count <= stream_count + 1;
-                        last_stream_addr <= qnice_addr_i;
-                        stream_addr_valid <= '1';
-                        qnice_wait_reg <= '0';
+                        if parser_byte_fifo_v then
+                           tail_rd_ptr <= tail_rd_ptr + 1;
+                           tail_count  <= tail_count - 1;
+                        else
+                           stream_count <= stream_count + 1;
+                           last_stream_addr <= qnice_addr_i;
+                           stream_addr_valid <= '1';
+                           qnice_wait_reg <= '0';
+                        end if;
 
                         if word_v < xex_start_addr then
 
@@ -895,6 +1028,10 @@ begin
                            state <= PREP_BLOCK_ST;
 
                         end if;
+
+                     elsif qnice_req_status = C_CSR_REQ_OK then
+
+                        state <= EOF_ST;
 
                      end if;
 
@@ -989,30 +1126,33 @@ begin
 
                   when PAYLOAD_ST =>
 
-                     if qnice_req_status = C_CSR_REQ_OK then
-
-                        state <= EOF_ST;
-
-                     elsif qnice_ce_i = '1' and
-                           qnice_csr = '0' and
-                           qnice_we_i = '1' and
-                           (stream_addr_valid = '0' or
-                            qnice_addr_i /= last_stream_addr) then
+                     if parser_byte_valid_v then
 
                         dma_addr_reg <=
                            "0000000000" &
                            std_logic_vector(xex_write_addr);
 
-                        dma_data_reg <= qnice_data_i(7 downto 0);
+                        dma_data_reg <= parser_byte_v;
                         dma_read_reg <= '0';
                         dma_req_toggle_reg <= not dma_req_toggle_reg;
 
-                        stream_count <= stream_count + 1;
-                        last_stream_addr <= qnice_addr_i;
-                        stream_addr_valid <= '1';
+                        if parser_byte_fifo_v then
+                           tail_rd_ptr <= tail_rd_ptr + 1;
+                           tail_count  <= tail_count - 1;
+                           payload_from_fifo <= '1';
+                        else
+                           stream_count <= stream_count + 1;
+                           last_stream_addr <= qnice_addr_i;
+                           stream_addr_valid <= '1';
+                           payload_from_fifo <= '0';
+                        end if;
 
                         dma_return_state <= PAYLOAD_COMPLETE_ST;
                         state <= DMA_WAIT_ST;
+
+                     elsif qnice_req_status = C_CSR_REQ_OK then
+
+                        state <= EOF_ST;
 
                      end if;
 
@@ -1022,16 +1162,26 @@ begin
                      if xex_write_addr = xex_end_addr then
 
                         segment_index <= segment_index + 1;
-                        stream_return_state <= RELEASE_BLOCK_ST;
+
+                        if payload_from_fifo = '1' then
+                           state <= RELEASE_BLOCK_ST;
+                        else
+                           stream_return_state <= RELEASE_BLOCK_ST;
+                           state <= STREAM_RELEASE_ST;
+                        end if;
 
                      else
 
                         xex_write_addr <= xex_write_addr + 1;
-                        stream_return_state <= PAYLOAD_ST;
+
+                        if payload_from_fifo = '1' then
+                           state <= PAYLOAD_ST;
+                        else
+                           stream_return_state <= PAYLOAD_ST;
+                           state <= STREAM_RELEASE_ST;
+                        end if;
 
                      end if;
-
-                     state <= STREAM_RELEASE_ST;
 
 
                   ----------------------------------------------------------
@@ -1078,71 +1228,276 @@ begin
 
                   when WAIT_NEXT_MAGIC_REQ_ST =>
 
-                     if qnice_req_status = C_CSR_REQ_OK then
+                     dma_addr_reg <=
+                        "0000000000" &
+                        std_logic_vector(C_XEX_MAGIC_ADDR);
 
-                        state <= EOF_ST;
+                     dma_data_reg <= (others => '0');
+                     dma_read_reg <= '1';
+                     dma_req_toggle_reg <= not dma_req_toggle_reg;
 
-                     else
-
-                        dma_addr_reg <=
-                           "0000000000" &
-                           std_logic_vector(C_XEX_MAGIC_ADDR);
-
-                        dma_data_reg <= (others => '0');
-                        dma_read_reg <= '1';
-
-                        dma_req_toggle_reg <= not dma_req_toggle_reg;
-
-                        dma_return_state <= WAIT_NEXT_MAGIC_CHECK_ST;
-                        state <= DMA_WAIT_ST;
-
-                     end if;
+                     dma_return_state <= WAIT_NEXT_MAGIC_CHECK_ST;
+                     state <= DMA_WAIT_ST;
 
 
                   when WAIT_NEXT_MAGIC_CHECK_ST =>
 
-                     if qnice_req_status = C_CSR_REQ_OK then
-                        state <= EOF_ST;
-                     elsif dma_readback_reg = x"60" then
+                     if dma_readback_reg = x"60" then
+
                         state <= WAIT_NEXT_STATUS_REQ_ST;
+
+                     elsif qnice_req_status = C_CSR_REQ_OK then
+
+                        -- Physical EOF arrived while INIT is still running.
+                        -- Validate the buffered tail before deciding whether it
+                        -- is legitimate XEX data or ignorable physical trailer.
+                        if tail_count = 0 then
+                           state <= EOF_ST;
+                        else
+                           tail_scan_ptr  <= tail_rd_ptr;
+                           tail_scan_left <= tail_count;
+                           state <= TAIL_VALIDATE_WORD_LO_ST;
+                        end if;
+
                      else
+
                         state <= WAIT_NEXT_MAGIC_REQ_ST;
+
                      end if;
 
 
                   when WAIT_NEXT_STATUS_REQ_ST =>
 
-                     if qnice_req_status = C_CSR_REQ_OK then
+                     dma_addr_reg <=
+                        "0000000000" &
+                        std_logic_vector(C_XEX_STATUS_ADDR);
 
-                        state <= EOF_ST;
+                     dma_data_reg <= (others => '0');
+                     dma_read_reg <= '1';
+                     dma_req_toggle_reg <= not dma_req_toggle_reg;
 
-                     else
-
-                        dma_addr_reg <=
-                           "0000000000" &
-                           std_logic_vector(C_XEX_STATUS_ADDR);
-
-                        dma_data_reg <= (others => '0');
-                        dma_read_reg <= '1';
-
-                        dma_req_toggle_reg <= not dma_req_toggle_reg;
-
-                        dma_return_state <= WAIT_NEXT_STATUS_CHECK_ST;
-                        state <= DMA_WAIT_ST;
-
-                     end if;
+                     dma_return_state <= WAIT_NEXT_STATUS_CHECK_ST;
+                     state <= DMA_WAIT_ST;
 
 
                   when WAIT_NEXT_STATUS_CHECK_ST =>
 
-                     if qnice_req_status = C_CSR_REQ_OK then
+                     if dma_readback_reg = x"00" then
+
+                        -- INIT returned. Replay FIFO before taking live bytes.
+                        state <= WORD_LO_ST;
+
+                     elsif qnice_req_status = C_CSR_REQ_OK then
+
+                        -- EOF while INIT is still running: validate pending bytes.
+                        if tail_count = 0 then
+                           state <= EOF_ST;
+                        else
+                           tail_scan_ptr  <= tail_rd_ptr;
+                           tail_scan_left <= tail_count;
+                           state <= TAIL_VALIDATE_WORD_LO_ST;
+                        end if;
+
+                     else
+
+                        state <= WAIT_NEXT_MAGIC_REQ_ST;
+
+                     end if;
+
+
+                  ----------------------------------------------------------
+                  -- Validate pending FIFO content as a complete XEX tail.
+                  --
+                  -- The validator is non-destructive: tail_rd_ptr/tail_count
+                  -- remain untouched. A valid tail is replayed only after INIT
+                  -- returns. An invalid/incomplete tail is treated as physical
+                  -- trailer data and discarded.
+                  ----------------------------------------------------------
+
+                  when TAIL_VALIDATE_WORD_LO_ST =>
+
+                     if tail_scan_left = 0 then
+
+                        -- Exactly consumed a valid sequence of segments.
+                        state <= TAIL_WAIT_MAGIC_REQ_ST;
+
+                     else
+
+                        tail_scan_lo <= tail_fifo(to_integer(tail_scan_ptr));
+                        tail_scan_ptr <= tail_scan_ptr + 1;
+                        tail_scan_left <= tail_scan_left - 1;
+                        state <= TAIL_VALIDATE_WORD_HI_ST;
+
+                     end if;
+
+
+                  when TAIL_VALIDATE_WORD_HI_ST =>
+
+                     if tail_scan_left = 0 then
+
+                        -- Odd trailing byte: not a complete XEX header.
+                        tail_rd_ptr <= tail_wr_ptr;
+                        tail_count  <= (others => '0');
                         state <= EOF_ST;
 
-                     elsif dma_readback_reg = x"00" then
+                     else
+
+                        word_v(7 downto 0)  := unsigned(tail_scan_lo);
+                        word_v(15 downto 8) :=
+                           unsigned(tail_fifo(to_integer(tail_scan_ptr)));
+
+                        tail_scan_ptr <= tail_scan_ptr + 1;
+                        tail_scan_left <= tail_scan_left - 1;
+
+                        if word_v = x"FFFF" then
+
+                           state <= TAIL_VALIDATE_WORD_LO_ST;
+
+                        else
+
+                           tail_scan_start <= word_v;
+                           state <= TAIL_VALIDATE_END_LO_ST;
+
+                        end if;
+
+                     end if;
+
+
+                  when TAIL_VALIDATE_END_LO_ST =>
+
+                     if tail_scan_left = 0 then
+
+                        tail_rd_ptr <= tail_wr_ptr;
+                        tail_count  <= (others => '0');
+                        state <= EOF_ST;
+
+                     else
+
+                        tail_scan_lo <= tail_fifo(to_integer(tail_scan_ptr));
+                        tail_scan_ptr <= tail_scan_ptr + 1;
+                        tail_scan_left <= tail_scan_left - 1;
+                        state <= TAIL_VALIDATE_END_HI_ST;
+
+                     end if;
+
+
+                  when TAIL_VALIDATE_END_HI_ST =>
+
+                     if tail_scan_left = 0 then
+
+                        tail_rd_ptr <= tail_wr_ptr;
+                        tail_count  <= (others => '0');
+                        state <= EOF_ST;
+
+                     else
+
+                        word_v(7 downto 0)  := unsigned(tail_scan_lo);
+                        word_v(15 downto 8) :=
+                           unsigned(tail_fifo(to_integer(tail_scan_ptr)));
+
+                        tail_scan_ptr <= tail_scan_ptr + 1;
+                        tail_scan_left <= tail_scan_left - 1;
+                        tail_scan_end <= word_v;
+
+                        if word_v < tail_scan_start then
+
+                           -- Invalid segment length in the pending tail.
+                           tail_rd_ptr <= tail_wr_ptr;
+                           tail_count  <= (others => '0');
+                           state <= EOF_ST;
+
+                        else
+
+                           -- Payload byte count = END - START + 1.
+                           tail_scan_payload <=
+                              resize(word_v, 17) -
+                              resize(tail_scan_start, 17) + 1;
+
+                           state <= TAIL_VALIDATE_PAYLOAD_ST;
+
+                        end if;
+
+                     end if;
+
+
+                  when TAIL_VALIDATE_PAYLOAD_ST =>
+
+                     if tail_scan_payload = 0 then
+
+                        state <= TAIL_VALIDATE_WORD_LO_ST;
+
+                     elsif tail_scan_left = 0 then
+
+                        -- Segment claims more payload than physically remains.
+                        tail_rd_ptr <= tail_wr_ptr;
+                        tail_count  <= (others => '0');
+                        state <= EOF_ST;
+
+                     else
+
+                        -- Payload contents do not matter to syntactic validity.
+                        tail_scan_ptr <= tail_scan_ptr + 1;
+                        tail_scan_left <= tail_scan_left - 1;
+                        tail_scan_payload <= tail_scan_payload - 1;
+
+                     end if;
+
+
+                  ----------------------------------------------------------
+                  -- Pending tail is syntactically valid XEX data. Physical EOF
+                  -- has already happened, so keep polling the Atari until INIT
+                  -- returns. Then replay the FIFO through the normal parser.
+                  ----------------------------------------------------------
+
+                  when TAIL_WAIT_MAGIC_REQ_ST =>
+
+                     dma_addr_reg <=
+                        "0000000000" &
+                        std_logic_vector(C_XEX_MAGIC_ADDR);
+
+                     dma_data_reg <= (others => '0');
+                     dma_read_reg <= '1';
+                     dma_req_toggle_reg <= not dma_req_toggle_reg;
+
+                     dma_return_state <= TAIL_WAIT_MAGIC_CHECK_ST;
+                     state <= DMA_WAIT_ST;
+
+
+                  when TAIL_WAIT_MAGIC_CHECK_ST =>
+
+                     if dma_readback_reg = x"60" then
+                        state <= TAIL_WAIT_STATUS_REQ_ST;
+                     else
+                        state <= TAIL_WAIT_MAGIC_REQ_ST;
+                     end if;
+
+
+                  when TAIL_WAIT_STATUS_REQ_ST =>
+
+                     dma_addr_reg <=
+                        "0000000000" &
+                        std_logic_vector(C_XEX_STATUS_ADDR);
+
+                     dma_data_reg <= (others => '0');
+                     dma_read_reg <= '1';
+                     dma_req_toggle_reg <= not dma_req_toggle_reg;
+
+                     dma_return_state <= TAIL_WAIT_STATUS_CHECK_ST;
+                     state <= DMA_WAIT_ST;
+
+
+                  when TAIL_WAIT_STATUS_CHECK_ST =>
+
+                     if dma_readback_reg = x"00" then
+
+                        -- INIT finally returned. The FIFO still contains the
+                        -- complete validated tail, so replay it normally.
                         state <= WORD_LO_ST;
 
                      else
-                        state <= WAIT_NEXT_MAGIC_REQ_ST;
+
+                        state <= TAIL_WAIT_MAGIC_REQ_ST;
+
                      end if;
 
 
@@ -1264,17 +1619,25 @@ begin
                         stream_count      <= (others => '0');
                         last_stream_addr  <= (others => '0');
                         stream_addr_valid <= '0';
+
+                        tail_wr_ptr       <= (others => '0');
+                        tail_rd_ptr       <= (others => '0');
+                        tail_count        <= (others => '0');
+                        payload_from_fifo <= '0';
+
+                        tail_scan_ptr     <= (others => '0');
+                        tail_scan_left    <= (others => '0');
+                        tail_scan_lo      <= (others => '0');
+                        tail_scan_start   <= (others => '0');
+                        tail_scan_end     <= (others => '0');
+                        tail_scan_payload <= (others => '0');
+
                         first_segment     <= '1';
                         segment_index     <= to_unsigned(1, segment_index'length);
 
                         xex_start_addr <= (others => '0');
                         xex_end_addr   <= (others => '0');
                         xex_write_addr <= (others => '0');
-
-
-
-
-
                         qnice_resp_error   <= (others => '0');
                         qnice_resp_address <= (others => '0');
 
@@ -1315,13 +1678,25 @@ begin
                         stream_count      <= (others => '0');
                         last_stream_addr  <= (others => '0');
                         stream_addr_valid <= '0';
+
+                        tail_wr_ptr       <= (others => '0');
+                        tail_rd_ptr       <= (others => '0');
+                        tail_count        <= (others => '0');
+                        payload_from_fifo <= '0';
+
+                        tail_scan_ptr     <= (others => '0');
+                        tail_scan_left    <= (others => '0');
+                        tail_scan_lo      <= (others => '0');
+                        tail_scan_start   <= (others => '0');
+                        tail_scan_end     <= (others => '0');
+                        tail_scan_payload <= (others => '0');
+
                         first_segment     <= '1';
                         segment_index     <= to_unsigned(1, segment_index'length);
 
                         xex_start_addr <= (others => '0');
                         xex_end_addr   <= (others => '0');
                         xex_write_addr <= (others => '0');
-
                         qnice_resp_error   <= (others => '0');
                         qnice_resp_address <= (others => '0');
 

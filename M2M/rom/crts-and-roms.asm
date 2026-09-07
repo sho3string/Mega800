@@ -576,82 +576,31 @@ _HNDLCRTROM_1   RSUB    CRTROM_CSR_R, 1
                 RBRA    _HNDLCRTROM_3, Z
                 RBRA    _HNDLCRTROM_1, 1
 
-_HNDLCRTROM_2   MOVE    LOG_STR_ROMPRSO, R8     ; log OK to serial terminal
+
+_HNDLCRTROM_2   MOVE    LOG_STR_ROMPRSO, R8
                 SYSCALL(puts, 1)
 
-                ; ------------------------------------------------------------
-                ; XEX diagnostic:
-                ; ADDR_LO = actual RUNAD ($02E0/$02E1)
-                ; ADDR_HI = diagnostic flags from xex_loader.vhd
-                ; ------------------------------------------------------------
-
-                MOVE    R0, R8                  ; restore CRT/ROM device id
-
-                MOVE    CRTROM_CSR_ADDR_LO, R9
-                RSUB    CRTROM_CSR_R, 1
-                MOVE    R10, R3                 ; R3 = RUNAD
-
-                MOVE    CRTROM_CSR_ADDR_HI, R9
-                RSUB    CRTROM_CSR_R, 1
-                MOVE    R10, R4                 ; R4 = diagnostic flags
-
-                MOVE    LOG_STR_XEXRUN, R8
-                SYSCALL(puts, 1)
-                MOVE    R3, R8
-                SYSCALL(puthex, 1)
-
-                MOVE    LOG_STR_XEXFLG, R8
-                SYSCALL(puts, 1)
-                MOVE    R4, R8
-                SYSCALL(puthex, 1)
-
-                SYSCALL(crlf, 1)
-
-                XOR     R8, R8                  ; everything OK, no error
+                XOR     R8, R8
                 XOR     R9, R9
                 RBRA    _HNDLCRTROM_R, 1
 
-_HNDLCRTROM_3   MOVE    CRTROM_CSR_PARSEE1, R9  ; retrieve error code
-                RSUB    CRTROM_CSR_R, 1
-                MOVE    R10, R0                 ; R0: error code
-                MOVE    CRTROM_CSR_ERR_STRT, R1 ; R1: ptr. to error string
 
-                ; --- diagnostic: also retrieve the packed diagnostic value
-                ; (segment_index in bits 22..16, xex_start_addr in bits
-                ; 15..0) the parser reported at the moment of the error.
-                ; R8 still holds the CRT/ROM device id here (CRTROM_CSR_R
-                ; leaves R8/R9 unchanged), so its safe to reuse.
-				
-                MOVE    CRTROM_CSR_ADDR_LO, R9
+_HNDLCRTROM_3   MOVE    CRTROM_CSR_PARSEE1, R9
                 RSUB    CRTROM_CSR_R, 1
-                MOVE    R10, R3                 ; R3: START (low 16 bits)
-                MOVE    CRTROM_CSR_ADDR_HI, R9
-                RSUB    CRTROM_CSR_R, 1
-                MOVE    R10, R4                 ; R4: SEG (low 7 bits)
+                MOVE    R10, R0
+                MOVE    CRTROM_CSR_ERR_STRT, R1
 
-                MOVE    LOG_STR_ROMPRSE, R8     ; log error to serial terminal
+                MOVE    LOG_STR_ROMPRSE, R8
                 SYSCALL(puts, 1)
-                MOVE    R0, R8                  ; log error code
+                MOVE    R0, R8
                 SYSCALL(puthex, 1)
                 MOVE    LOG_STR_ROMPRSC, R8
                 SYSCALL(puts, 1)
-                MOVE    R1, R8                  ; log error string
+                MOVE    R1, R8
                 RSUB    LOG_STR, 1
 
-                ; --- diagnostic: print "SEG=$xxxx START=$xxxx\n"
-                MOVE    LOG_STR_ROMPRSD, R8     ; NEW: "SEG=$"
-                SYSCALL(puts, 1)
-                MOVE    R4, R8
-                SYSCALL(puthex, 1)
-                MOVE    LOG_STR_ROMPRSF, R8     ; NEW: " START=$"
-                SYSCALL(puts, 1)
-                MOVE    R3, R8
-                SYSCALL(puthex, 1)
-                MOVE    LOG_STR_ROMPRSG, R8     ; NEW: "\n"
-                SYSCALL(puts, 1)
-
-                MOVE    R0, R8                  ; log error code and
-                MOVE    R1, R9                  ; error string
+                MOVE    R0, R8
+                MOVE    R1, R9
 
 _HNDLCRTROM_R   MOVE    R2, R10                 ; R10: unchanged
                 DECRB
