@@ -578,6 +578,35 @@ _HNDLCRTROM_1   RSUB    CRTROM_CSR_R, 1
 
 _HNDLCRTROM_2   MOVE    LOG_STR_ROMPRSO, R8     ; log OK to serial terminal
                 SYSCALL(puts, 1)
+
+                ; ------------------------------------------------------------
+                ; XEX diagnostic:
+                ; ADDR_LO = actual RUNAD ($02E0/$02E1)
+                ; ADDR_HI = diagnostic flags from xex_loader.vhd
+                ; ------------------------------------------------------------
+
+                MOVE    R0, R8                  ; restore CRT/ROM device id
+
+                MOVE    CRTROM_CSR_ADDR_LO, R9
+                RSUB    CRTROM_CSR_R, 1
+                MOVE    R10, R3                 ; R3 = RUNAD
+
+                MOVE    CRTROM_CSR_ADDR_HI, R9
+                RSUB    CRTROM_CSR_R, 1
+                MOVE    R10, R4                 ; R4 = diagnostic flags
+
+                MOVE    LOG_STR_XEXRUN, R8
+                SYSCALL(puts, 1)
+                MOVE    R3, R8
+                SYSCALL(puthex, 1)
+
+                MOVE    LOG_STR_XEXFLG, R8
+                SYSCALL(puts, 1)
+                MOVE    R4, R8
+                SYSCALL(puthex, 1)
+
+                SYSCALL(crlf, 1)
+
                 XOR     R8, R8                  ; everything OK, no error
                 XOR     R9, R9
                 RBRA    _HNDLCRTROM_R, 1

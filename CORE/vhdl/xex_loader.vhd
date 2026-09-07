@@ -70,6 +70,7 @@ architecture beh of xex_loader is
 
    signal qnice_resp_address : std_logic_vector(22 downto 0)
                                := (others => '0');
+                              
 
    constant C_ERROR_STRINGS : string_vector(0 to 15) := (
        0      => "OK                 \n",
@@ -92,14 +93,16 @@ architecture beh of xex_loader is
 
    type byte_array_t is array (natural range <>) of
       std_logic_vector(7 downto 0);
-
-   constant C_XEX_LOADER : byte_array_t(0 to 32) := (
-      x"61", x"A2", x"00", x"86", x"09", x"CA", x"9A", x"CE",
-      x"00", x"D1", x"CE", x"0E", x"D1", x"A9", x"01", x"F0",
-      x"FC", x"30", x"09", x"A9", x"D1", x"48", x"A9", x"09",
-      x"48", x"6C", x"E2", x"02", x"CE", x"00", x"D1", x"6C",
-      x"E0"
-   );
+   
+   constant C_XEX_LOADER : byte_array_t(0 to 33) := (
+   x"61", x"A2", x"00", x"86", x"09", x"CA", x"9A", x"CE",
+   x"00", x"D1", x"CE", x"0E", x"D1", x"A9", x"01", x"F0",
+   x"FC", x"30", x"09", x"A9", x"D1", x"48", x"A9", x"09",
+   x"48", x"6C", x"E2", x"02", x"CE", x"00", x"D1", x"6C",
+   x"E0", x"02"
+);
+   
+   
 
    constant C_XEX_MAGIC_ADDR  : unsigned(15 downto 0) := x"D100";
    constant C_XEX_STATUS_ADDR : unsigned(15 downto 0) := x"D10E";
@@ -122,6 +125,8 @@ architecture beh of xex_loader is
       RESET_HOLD_ST,
       MODE_SETTLE_ST,
 
+      CLEAR_RAM_ST,
+      CLEAR_RAM_NEXT_ST,
       INSTALL_LOADER_ST,
       INSTALL_LOADER_NEXT_ST,
 
@@ -208,8 +213,10 @@ architecture beh of xex_loader is
 
    signal reset_count      : unsigned(7 downto 0) := (others => '0');
    signal settle_count     : unsigned(4 downto 0) := (others => '0');
+   signal clear_addr       : unsigned(15 downto 0) := (others => '0');
 
-   signal loader_index     : integer range 0 to 32 := 0;
+
+   signal loader_index     : integer range 0 to 33 := 0;
    signal fixed_index      : integer range 0 to 11 := 0;
    signal block_prep_index : integer range 0 to 3 := 0;
 
@@ -233,7 +240,7 @@ architecture beh of xex_loader is
    signal dma_ack_seen  : std_logic := '0';
 
    signal dma_readback_reg : std_logic_vector(7 downto 0)
-                             := (others => '0');
+                              := (others => '0');
 
 
    ---------------------------------------------------------------------------
@@ -351,11 +358,11 @@ begin
    --
    -- CSR accesses keep using qnice_csr's own WAIT response.
    --
-   -- File-stream accesses use qnice_wait_reg.  Unlike the old state-derived
-   -- combinational WAIT, qnice_wait_reg is only deasserted by qnice_proc after
-   -- the pending transaction has actually been consumed.  This prevents a
-   -- newly-entered parser state from acknowledging a held byte one clock
-   -- before that state's clocked capture logic runs.
+   -- File-stream accesses use qnice_wait_reg.  Unlike a state-derived
+   -- combinational WAIT, qnice_wait_reg is only deasserted by qnice_proc
+   -- after the pending transaction has actually been consumed.  This
+   -- prevents a newly-entered parser state from acknowledging a held byte
+   -- one clock before that state's clocked capture logic runs.
    ---------------------------------------------------------------------------
 
    qnice_bus_comb : process(all)
@@ -429,6 +436,8 @@ begin
 
             reset_count      <= (others => '0');
             settle_count     <= (others => '0');
+            clear_addr       <= (others => '0');
+
             loader_index     <= 0;
             fixed_index      <= 0;
             block_prep_index <= 0;
@@ -440,6 +449,10 @@ begin
 
             dma_ack_seen     <= '0';
             dma_readback_reg <= (others => '0');
+
+
+
+
 
             xex_loader_mode <= '0';
             core_reset      <= '0';
@@ -508,6 +521,9 @@ begin
                         xex_end_addr   <= (others => '0');
                         xex_write_addr <= (others => '0');
 
+
+
+
                         -- Align to the current ACK toggle before issuing our
                         -- first DMA transaction of this load.
                         dma_ack_seen <= dma_ack_sync2;
@@ -564,8 +580,8 @@ begin
 
                      if settle_count = to_unsigned(15, settle_count'length) then
 
-                        loader_index <= 0;
-                        state <= INSTALL_LOADER_ST;
+                        clear_addr <= (others => '0');
+                        state <= CLEAR_RAM_ST;
 
                      else
 
@@ -575,7 +591,42 @@ begin
 
 
                   ----------------------------------------------------------
-                  -- Install 33-byte Atari bootstrap at $D100.
+                  -- Match MiSTer XEX startup: clear the first 64K of Atari RAM
+                  -- before installing the $D100 bootstrap and OS variables.
+                  ----------------------------------------------------------
+
+                  when CLEAR_RAM_ST =>
+
+                     dma_addr_reg <=
+                        "0000000000" &
+                        std_logic_vector(clear_addr);
+
+                     dma_data_reg <= x"00";
+                     dma_read_reg <= '0';
+
+                     dma_req_toggle_reg <= not dma_req_toggle_reg;
+
+                     dma_return_state <= CLEAR_RAM_NEXT_ST;
+                     state <= DMA_WAIT_ST;
+
+
+                  when CLEAR_RAM_NEXT_ST =>
+
+                     if clear_addr = x"FFFF" then
+
+                        loader_index <= 0;
+                        state <= INSTALL_LOADER_ST;
+
+                     else
+
+                        clear_addr <= clear_addr + 1;
+                        state <= CLEAR_RAM_ST;
+
+                     end if;
+
+
+                  ----------------------------------------------------------
+                  -- Install 34-byte Atari bootstrap at $D100.
                   ----------------------------------------------------------
 
                   when INSTALL_LOADER_ST =>
@@ -597,17 +648,17 @@ begin
 
                   when INSTALL_LOADER_NEXT_ST =>
 
-                     if loader_index = 32 then
-
-                        fixed_index <= 0;
-                        state <= INSTALL_FIXED_ST;
-
-                     else
-
-                        loader_index <= loader_index + 1;
-                        state <= INSTALL_LOADER_ST;
-
-                     end if;
+                   if loader_index = 33 then
+                
+                      fixed_index <= 0;
+                      state <= INSTALL_FIXED_ST;
+                
+                   else
+                
+                      loader_index <= loader_index + 1;
+                      state <= INSTALL_LOADER_ST;
+                
+                   end if;
 
 
                   ----------------------------------------------------------
@@ -755,9 +806,7 @@ begin
 
                      if qnice_req_status = C_CSR_REQ_OK then
 
-                        qnice_resp_status <= C_CSR_RESP_ERROR;
-                        qnice_resp_error  <= x"3";
-                        state <= ERROR_ST;
+                        state <= EOF_ST;
 
                      elsif qnice_ce_i = '1' and
                            qnice_csr = '0' and
@@ -791,9 +840,7 @@ begin
 
                      if qnice_req_status = C_CSR_REQ_OK then
 
-                        qnice_resp_status <= C_CSR_RESP_ERROR;
-                        qnice_resp_error  <= x"3";
-                        state <= ERROR_ST;
+                        state <= EOF_ST;
 
                      elsif qnice_ce_i = '1' and
                            qnice_csr = '0' and
@@ -819,9 +866,7 @@ begin
 
                      if qnice_req_status = C_CSR_REQ_OK then
 
-                        qnice_resp_status <= C_CSR_RESP_ERROR;
-                        qnice_resp_error  <= x"3";
-                        state <= ERROR_ST;
+                        state <= EOF_ST;
 
                      elsif qnice_ce_i = '1' and
                            qnice_csr = '0' and
@@ -839,12 +884,8 @@ begin
 
                         if word_v < xex_start_addr then
 
-                           qnice_resp_status <= C_CSR_RESP_ERROR;
-                           qnice_resp_error  <= x"2";
-                           qnice_resp_address <=
-                              std_logic_vector(segment_index) &
-                              std_logic_vector(xex_start_addr);
-                           state <= ERROR_ST;
+                           -- MiSTer: read_len < 1 goes directly to xex_eof.
+                           state <= EOF_ST;
 
                         else
 
@@ -950,9 +991,7 @@ begin
 
                      if qnice_req_status = C_CSR_REQ_OK then
 
-                        qnice_resp_status <= C_CSR_RESP_ERROR;
-                        qnice_resp_error  <= x"3";
-                        state <= ERROR_ST;
+                        state <= EOF_ST;
 
                      elsif qnice_ce_i = '1' and
                            qnice_csr = '0' and
@@ -1004,13 +1043,14 @@ begin
 
                   when RELEASE_BLOCK_ST =>
 
+                     -- One complete segment is in Atari RAM. Release the
+                     -- Atari-side bootstrap through INITAD.
                      dma_addr_reg <=
                         "0000000000" &
                         std_logic_vector(C_XEX_STATUS_ADDR);
 
                      dma_data_reg <= x"01";
                      dma_read_reg <= '0';
-
                      dma_req_toggle_reg <= not dma_req_toggle_reg;
 
                      dma_return_state <= WAIT_NEXT_MAGIC_REQ_ST;
@@ -1023,26 +1063,47 @@ begin
                   --
                   --    D100 = $60
                   --    D10E = $00
+                  --
+                  -- IMPORTANT: if the segment we just released was the last
+                  -- one in the file, INITAD may point at real program code
+                  -- that never returns to the bootstrap spin loop (e.g. it
+                  -- IS the game's entry point).  In that case D100/D10E will
+                  -- never show $60/$00 again.  By the time HANDLE_CRTROM_M
+                  -- sets STATUS=OK, the entire file has already streamed
+                  -- through us (see crts-and-roms.asm's _LI_FREAD_S loop),
+                  -- so if we observe REQ_OK while still waiting here, that
+                  -- is a normal, successful end of file, not an error --
+                  -- go straight to EOF_ST rather than spinning forever.
                   ----------------------------------------------------------
 
                   when WAIT_NEXT_MAGIC_REQ_ST =>
 
-                     dma_addr_reg <=
-                        "0000000000" &
-                        std_logic_vector(C_XEX_MAGIC_ADDR);
+                     if qnice_req_status = C_CSR_REQ_OK then
 
-                     dma_data_reg <= (others => '0');
-                     dma_read_reg <= '1';
+                        state <= EOF_ST;
 
-                     dma_req_toggle_reg <= not dma_req_toggle_reg;
+                     else
 
-                     dma_return_state <= WAIT_NEXT_MAGIC_CHECK_ST;
-                     state <= DMA_WAIT_ST;
+                        dma_addr_reg <=
+                           "0000000000" &
+                           std_logic_vector(C_XEX_MAGIC_ADDR);
+
+                        dma_data_reg <= (others => '0');
+                        dma_read_reg <= '1';
+
+                        dma_req_toggle_reg <= not dma_req_toggle_reg;
+
+                        dma_return_state <= WAIT_NEXT_MAGIC_CHECK_ST;
+                        state <= DMA_WAIT_ST;
+
+                     end if;
 
 
                   when WAIT_NEXT_MAGIC_CHECK_ST =>
 
-                     if dma_readback_reg = x"60" then
+                     if qnice_req_status = C_CSR_REQ_OK then
+                        state <= EOF_ST;
+                     elsif dma_readback_reg = x"60" then
                         state <= WAIT_NEXT_STATUS_REQ_ST;
                      else
                         state <= WAIT_NEXT_MAGIC_REQ_ST;
@@ -1051,23 +1112,35 @@ begin
 
                   when WAIT_NEXT_STATUS_REQ_ST =>
 
-                     dma_addr_reg <=
-                        "0000000000" &
-                        std_logic_vector(C_XEX_STATUS_ADDR);
+                     if qnice_req_status = C_CSR_REQ_OK then
 
-                     dma_data_reg <= (others => '0');
-                     dma_read_reg <= '1';
+                        state <= EOF_ST;
 
-                     dma_req_toggle_reg <= not dma_req_toggle_reg;
+                     else
 
-                     dma_return_state <= WAIT_NEXT_STATUS_CHECK_ST;
-                     state <= DMA_WAIT_ST;
+                        dma_addr_reg <=
+                           "0000000000" &
+                           std_logic_vector(C_XEX_STATUS_ADDR);
+
+                        dma_data_reg <= (others => '0');
+                        dma_read_reg <= '1';
+
+                        dma_req_toggle_reg <= not dma_req_toggle_reg;
+
+                        dma_return_state <= WAIT_NEXT_STATUS_CHECK_ST;
+                        state <= DMA_WAIT_ST;
+
+                     end if;
 
 
                   when WAIT_NEXT_STATUS_CHECK_ST =>
 
-                     if dma_readback_reg = x"00" then
+                     if qnice_req_status = C_CSR_REQ_OK then
+                        state <= EOF_ST;
+
+                     elsif dma_readback_reg = x"00" then
                         state <= WORD_LO_ST;
+
                      else
                         state <= WAIT_NEXT_MAGIC_REQ_ST;
                      end if;
@@ -1078,17 +1151,30 @@ begin
                   --
                   -- D10E = $FF is negative, so the bootstrap takes init_go,
                   -- changes D100 $60->$5F and jumps through RUNAD.
+                  --
+                  -- NOTE: if we reached EOF_ST via the "last segment never
+                  -- returned" path above (rather than via WORD_LO_ST), the
+                  -- Atari CPU is not necessarily sitting in the bootstrap
+                  -- spin loop waiting for this write -- it may already be
+                  -- running the loaded program.  This write is harmless in
+                  -- that case (D10E of a program that isn't the bootstrap
+                  -- is just an unused RAM byte); its only purpose is to
+                  -- cleanly finish our own protocol with the QNICE side.
                   ----------------------------------------------------------
 
                   when EOF_ST =>
 
+                     -- Final host signal.  If the Atari is waiting in the
+                     -- bootstrap, $FF is negative and takes init_go ->
+                     -- JMP ($02E0).  If the last INIT already started the
+                     -- program and never returned, this is just a harmless
+                     -- write to the loader status byte.
                      dma_addr_reg <=
                         "0000000000" &
                         std_logic_vector(C_XEX_STATUS_ADDR);
 
                      dma_data_reg <= x"FF";
                      dma_read_reg <= '0';
-
                      dma_req_toggle_reg <= not dma_req_toggle_reg;
 
                      dma_return_state <= EOF_COMPLETE_ST;
@@ -1125,20 +1211,27 @@ begin
                   -- completed.  The combinational WAIT logic re-stalls a new
                   -- address immediately so the next payload byte cannot run
                   -- ahead while we change state.
+                  --
+                  -- EOF handling: if this was the last byte of the last
+                  -- segment (stream_return_state = RELEASE_BLOCK_ST), the
+                  -- framework declaring REQ_OK here is the normal, successful
+                  -- end of file -- go to EOF_ST. If more payload was still
+                  -- expected (stream_return_state = PAYLOAD_ST), REQ_OK here
+                  -- means the file ended in the middle of a segment, which is
+                  -- a genuine error.
                   ----------------------------------------------------------
 
                   when STREAM_RELEASE_ST =>
 
-                     -- The payload byte has already completed its Atari DMA
-                     -- transaction before we enter this state.  Release only
-                     -- that held QNICE write.  Once QNICE drops CE or advances
-                     -- to the next address, WAIT returns high and the parser
-                     -- moves on to its saved return state.
-                     if qnice_ce_i = '1' and
-                        qnice_csr = '0' and
-                        qnice_we_i = '1' and
-                        stream_addr_valid = '1' and
-                        qnice_addr_i = last_stream_addr then
+                     if qnice_req_status = C_CSR_REQ_OK then
+
+                        state <= EOF_ST;
+
+                     elsif qnice_ce_i = '1' and
+                           qnice_csr = '0' and
+                           qnice_we_i = '1' and
+                           stream_addr_valid = '1' and
+                           qnice_addr_i = last_stream_addr then
 
                         qnice_wait_reg <= '0';
 
@@ -1157,14 +1250,45 @@ begin
                   when DONE_ST =>
 
                      qnice_wait_reg <= '0';
-
                      qnice_resp_status <= C_CSR_RESP_READY;
 
-                     if qnice_req_status = C_CSR_REQ_IDLE then
+                     -- M2M keeps the CRT/ROM status at OK after a completed
+                     -- manual load so the menu can remember that the slot is
+                     -- loaded. Therefore a second load does NOT necessarily
+                     -- pass through C_CSR_REQ_IDLE. Re-arm immediately when
+                     -- the framework starts a new byte stream.
+                     if qnice_req_status = C_CSR_REQ_LDNG then
+
+                        qnice_wait_reg <= '1';
+
+                        stream_count      <= (others => '0');
+                        last_stream_addr  <= (others => '0');
+                        stream_addr_valid <= '0';
+                        first_segment     <= '1';
+                        segment_index     <= to_unsigned(1, segment_index'length);
+
+                        xex_start_addr <= (others => '0');
+                        xex_end_addr   <= (others => '0');
+                        xex_write_addr <= (others => '0');
+
+
+
+
+
+                        qnice_resp_error   <= (others => '0');
+                        qnice_resp_address <= (others => '0');
+
+                        -- Align to the current ACK toggle before the new load.
+                        dma_ack_seen <= dma_ack_sync2;
+
+                        qnice_resp_status <= C_CSR_RESP_PARSING;
+                        state <= START_XEX_ST;
+
+                     elsif qnice_req_status = C_CSR_REQ_IDLE then
 
                         qnice_resp_status <= C_CSR_RESP_IDLE;
                         qnice_resp_error  <= (others => '0');
-
+                        qnice_resp_address <= (others => '0');
                         state <= IDLE_ST;
 
                      end if;
@@ -1177,20 +1301,45 @@ begin
                   when ERROR_ST =>
 
                      qnice_wait_reg <= '0';
-
                      qnice_resp_status <= C_CSR_RESP_ERROR;
 
                      core_reset <= '0';
                      core_pause <= '0';
 
-                     if qnice_req_status = C_CSR_REQ_IDLE then
+                     -- Same re-arm rule as DONE_ST: a new manual file load can
+                     -- transition directly to LDNG without an intervening IDLE.
+                     if qnice_req_status = C_CSR_REQ_LDNG then
+
+                        qnice_wait_reg <= '1';
+
+                        stream_count      <= (others => '0');
+                        last_stream_addr  <= (others => '0');
+                        stream_addr_valid <= '0';
+                        first_segment     <= '1';
+                        segment_index     <= to_unsigned(1, segment_index'length);
+
+                        xex_start_addr <= (others => '0');
+                        xex_end_addr   <= (others => '0');
+                        xex_write_addr <= (others => '0');
+
+                        qnice_resp_error   <= (others => '0');
+                        qnice_resp_address <= (others => '0');
+
+                        -- Align to the current ACK toggle before the new load.
+                        dma_ack_seen <= dma_ack_sync2;
+
+                        qnice_resp_status <= C_CSR_RESP_PARSING;
+                        state <= START_XEX_ST;
+
+                     elsif qnice_req_status = C_CSR_REQ_IDLE then
 
                         qnice_resp_status <= C_CSR_RESP_IDLE;
                         qnice_resp_error  <= (others => '0');
-
+                        qnice_resp_address <= (others => '0');
                         state <= IDLE_ST;
 
                      end if;
+
 
                end case;
 
