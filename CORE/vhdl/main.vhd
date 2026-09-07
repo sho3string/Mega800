@@ -385,7 +385,7 @@ begin
 
       PS2_KEY                 => ps2_key,
 
-      -- joysticks next
+      -- analog joysticks - TO DO
       JOY1X                   => (others => '0'),
       JOY1Y                   => (others => '0'),
       JOY2X                   => (others => '0'),
@@ -395,8 +395,13 @@ begin
       JOY4X                   => (others => '0'),
       JOY4Y                   => (others => '0'),
 
-      JOY1                    => (others => '0'),
-      JOY2                    => (others => '0'),
+      JOY1                    => (0=>not joy_1_right_n_i,1=> not joy_1_left_n_i,
+                                  2=>not joy_1_down_n_i, 3=> not joy_1_up_n_i,
+                                  4=>not joy_1_fire_n_i,others=> '0'),
+      JOY2                    => (0=>not joy_2_right_n_i,1=>not joy_2_left_n_i,
+                                  2=>not joy_2_down_n_i, 3=>not joy_2_up_n_i,
+                                  4 => not joy_2_fire_n_i,others=> '0'),
+      -- to be connected via joystick expansion board
       JOY3                    => (others => '0'),
       JOY4                    => (others => '0')
    );
