@@ -465,14 +465,31 @@ _HM_SDMOUNTED5  MOVE    SCR$OSM_O_DX, R8        ; set "%s is replaced" flag
                 ADD     R0, R8
                 MOVE    0, @R8
 
+                ; For manually loaded CRT/ROM/XEX files, hide the large
+                ; file-browser/progress OSD while LOAD_IMAGE continues.
+                ; This lets an Atari INIT/cracktro become visible and
+                ; interactive while the XEX stream is still active.
+                CMP     1, R5                   ; CRT/ROM/XEX mode?
+                RBRA    _HM_XEX_VISIBLE, !Z
+
+                ; Hide browser/progress overlay
+                RSUB    SCR$OSM_OFF, 1
+
+                ; Reconnect physical input to the running Atari while
+                ; the synchronous XEX load continues.
+                MOVE    M2M$CSR, R8
+                OR      M2M$CSR_KBD_JOY, @R8
+
+_HM_XEX_VISIBLE
+
                 ; load the disk image to the mount buffer
-                MOVE    SP, R6                  ; remember stack pointer
-                MOVE    R7, R8                  ; R8: drive ID to be mounted
-                MOVE    R2, R9                  ; R9: file name of disk image
-                MOVE    R5, R10                 ; R10: mode: vdrive or CRT/ROM
-                RSUB    LOAD_IMAGE, 1           ; copy disk img to mount buf.
-                CMP     0, R8                   ; everything OK?
-                RBRA    _HM_SDMOUNTED6A, Z      ; yes
+                MOVE    SP, R6
+                MOVE    R7, R8
+                MOVE    R2, R9
+                MOVE    R5, R10
+                RSUB    LOAD_IMAGE, 1
+                CMP     0, R8
+                RBRA    _HM_SDMOUNTED6A, Z
 
                 ; loading the disk image did not work
                 ; none of the errors that LOAD_IMAGE returns is fatal, so we

@@ -266,22 +266,15 @@ architecture beh of xex_loader is
    -- DMA registers and ACK CDC
    ---------------------------------------------------------------------------
 
-   signal dma_addr_reg : std_logic_vector(25 downto 0)
-                         := (others => '0');
-
-   signal dma_data_reg : std_logic_vector(7 downto 0)
-                         := (others => '0');
-
+   signal dma_addr_reg : std_logic_vector(25 downto 0) := (others => '0');
+   signal dma_data_reg : std_logic_vector(7 downto 0) := (others => '0');
    signal dma_read_reg : std_logic := '0';
-
    signal dma_req_toggle_reg : std_logic := '0';
-
    signal dma_ack_sync1 : std_logic := '0';
    signal dma_ack_sync2 : std_logic := '0';
    signal dma_ack_seen  : std_logic := '0';
 
-   signal dma_readback_reg : std_logic_vector(7 downto 0)
-                              := (others => '0');
+   signal dma_readback_reg : std_logic_vector(7 downto 0) := (others => '0');
 
 
    ---------------------------------------------------------------------------
