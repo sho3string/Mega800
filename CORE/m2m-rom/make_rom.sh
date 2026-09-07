@@ -36,6 +36,18 @@ awk '/constant C_VDNUM/ {gsub(/.*:=|;.*/, "", $0); split($0, a, " "); val=a[1]; 
 awk '/constant C_CRTROMS_MAN_NUM/ {gsub(/.*:=|;.*/, "", $0); split($0, a, " "); val=a[1]; if (val+0 == 0) val=1; printf("CRTROM_MAN_MAX              .EQU %s\n", val)}' ../vhdl/globals.vhd >> globals.asm
 awk '/constant C_CRTROMS_AUTO_NUM/ {gsub(/.*:=|;.*/, "", $0); split($0, a, " "); val=a[1]; if (val+0 == 0) val=1; printf("CRTROM_AUT_MAX              .EQU %s\n", val)}' ../vhdl/globals.vhd >> globals.asm
 
+
+
+{
+    echo ""
+    echo "; -----------------------------------------------------------------"
+    echo "; Atari 800 specific menu group items"
+    echo "; -----------------------------------------------------------------"
+    echo ""
+} >> osm_const.asm
+
+awk '/constant OPTM_G_/ && !/16#/ {gsub("OPTM_G_", "OPTM_G_"); gsub(";", ""); printf("%-27s .EQU %s\n", $2, $6)}' ../vhdl/config.vhd > osm_const.asm
+
 ##############################################################################
 # M2M framework: Generate shell_fhandles.asm
 ##############################################################################

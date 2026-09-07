@@ -34,6 +34,8 @@
 ; also remove the include "shell_vars.asm" in the variables section below.
 #include "../../M2M/rom/shell.asm"
 
+#include "osm_const.asm"
+
 ; ----------------------------------------------------------------------------
 ; Firmware: Main Code
 ; ----------------------------------------------------------------------------
@@ -80,7 +82,34 @@ SUBMENU_SUMMARY XOR     R8, R8                  ; R8 = 0 = no custom string
 ;  R10: @TODO: Future release: Context (see CTX_* in sysdef.asm)
 ; Output:
 ;   R8: 0=do not filter file, i.e. show file
-FILTER_FILES    XOR     R8, R8                  ; R8 = 0 = do not filter file
+FILTER_FILES    INCRB
+                MOVE    R9, R0
+
+                ; Never filter directories
+                CMP     1, R9
+                RBRA    _FFILES_RET_0, Z
+
+                ; Only apply filtering to CRT/ROM/XEX loading
+                CMP     CTX_LOAD_ROM, R10
+                RBRA    _FFILES_RET_0, !Z
+
+                ; Only filter the "Load XEX" menu item
+                CMP     OPTM_G_LOAD_ATARI_XEX, R11
+                RBRA    _FFILES_RET_0, !Z
+
+                ; Only allow .XEX
+                MOVE    ATARI_XEXFILE, R9
+                RSUB    M2M$CHK_EXT, 1
+                RBRA    _FFILES_RET_0, C
+
+                ; Wrong extension: hide it
+                MOVE    1, R8
+                RBRA    _FFILES_RET, 1
+
+_FFILES_RET_0   XOR     R8, R8
+
+_FFILES_RET     MOVE    R0, R9
+                DECRB
                 RET
 
 ; PREP_LOAD_IMAGE callback function:
@@ -187,6 +216,8 @@ CUSTOM_MSG      XOR     R8, R8
 
 ; Add your core specific constants and strings here
 
+ATARI_XEXFILE     .ASCII_W ".XEX"
+
 ; This needs to be the last thing before the "Variables" sections starts
 END_OF_ROM      .DW 0
 
@@ -199,12 +230,11 @@ END_OF_ROM      .DW 0
                 .ORG    0x8000                  ; RAM starts at 0x8000
 #endif
 
-;
-; add your own variables here
-;
 
 ; M2M Shell variables (only include, if you included "shell.asm" above)
 #include "../../M2M/rom/shell_vars.asm"
+
+
 
 ; ----------------------------------------------------------------------------
 ; Heap and Stack: Need to be located in RAM after the variables
