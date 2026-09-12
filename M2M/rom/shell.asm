@@ -491,11 +491,22 @@ _HM_XEX_VISIBLE
                 CMP     0, R8
                 RBRA    _HM_SDMOUNTED6A, Z
 
+                ; LOAD_IMAGE failed. XEX loading temporarily connected
+                ; keyboard/joysticks to the core. Since the Shell owns
+                ; the error/file-browser UI again, disconnect them.
+                CMP     1, R5
+                RBRA    _HM_LOAD_ERR_KBD_DONE, !Z
+
+                MOVE    M2M$CSR, R8
+                AND     M2M$CSR_UN_KBD_JOY, @R8
+
+_HM_LOAD_ERR_KBD_DONE
+
                 ; loading the disk image did not work
                 ; none of the errors that LOAD_IMAGE returns is fatal, so we
                 ; will show an error message to the user and then we will
                 ; let him chose another file
-                RSUB    SCR$CLRINNER, 1         ; print error message
+                RSUB    SCR$CLRINNER, 1
                 MOVE    R8, R0
                 MOVE    R9, R1
                 MOVE    WRN_ERROR_CODE, R8
@@ -602,11 +613,23 @@ _HM_SDMOUNTED6C MOVE    R9, R8                  ; R8: menu index
                 RSUB    _OPTM_GK_MNT, 1
 
                 ; 6. Redraw and show the OSM
-_HM_SDMOUNTED7  RSUB    OPTM_SHOW, 1            
+_HM_SDMOUNTED7
+
+                ; The XEX loader temporarily reconnects keyboard/joysticks
+                ; while LOAD_IMAGE is active so Atari INIT/cracktro code can
+                ; receive input.  We are about to show the normal OSD again,
+                ; so disconnect physical input from the core exactly as the
+                ; regular menu expects.
+                CMP     1, R5
+                RBRA    _HM_SDMOUNTED7A, !Z
+
+                MOVE    M2M$CSR, R8
+                AND     M2M$CSR_UN_KBD_JOY, @R8
+
+_HM_SDMOUNTED7A
+                RSUB    OPTM_SHOW, 1
                 RSUB    SCR$OSM_O_ON, 1
                 RBRA    _HM_RET, 1
-
-                ; Virtual drive (number in R8) is already mounted
 
                 ; Write cache of drive dirty? Prevent any unmount/remount
 _HM_MOUNTED     MOVE    R7, R8
