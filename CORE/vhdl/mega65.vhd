@@ -347,6 +347,7 @@ signal xex_core_reset_main        : std_logic := '0';
 signal xex_core_pause_sync1       : std_logic := '0';
 signal xex_core_pause_main        : std_logic := '0';
 
+
 begin
 
    qnice_hdmi_view_size_o <= (others => '0');
@@ -527,7 +528,8 @@ begin
          pot2_x_i             => main_pot2_x_i,
          pot2_y_i             => main_pot2_y_i,
          
-         osm_control_i        => main_osm_control_i
+         osm_control_i        => main_osm_control_i,
+         rtc_i                => main_rtc_i
 
       ); -- i_main
       

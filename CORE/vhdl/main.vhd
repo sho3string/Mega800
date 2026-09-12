@@ -124,7 +124,8 @@ entity main is
       pot2_x_i                : in  std_logic_vector(7 downto 0);
       pot2_y_i                : in  std_logic_vector(7 downto 0);
       
-      osm_control_i           : in  std_logic_vector(255 downto 0)
+      osm_control_i           : in  std_logic_vector(255 downto 0);
+      rtc_i                   : in  std_logic_vector(64 downto 0)
    );
 end entity main;
 
@@ -327,8 +328,8 @@ begin
       HPS_DMA_DATA_IN         => dma_data_in,
       HPS_DMA_READY           => dma_ready,
 
-      PAL                     => '1', -- PAL for now.
-      CLIP_SIDES              => '0',
+      PAL                     => osm_control_i(C_MENU_PAL),
+      CLIP_SIDES              => osm_control_i(C_MENU_CLIP_SIDES),
       --GTIA_XCOLOR             => '0', n/a
  
       VGA_VS                  => atari_vs,
@@ -358,7 +359,7 @@ begin
       WARM_RESET_MENU         => '0',
       COLD_RESET_MENU         => '0',
 
-      RTC                     => (others => '0'),
+      RTC                     => rtc_i,
 
       -- CLK_CONF              => fixed NTSC configuration,
 

@@ -329,7 +329,7 @@ constant OPTM_S_SAVING     : string := "<Saving>";          -- the internal writ
 --             Do use a lower case \n. If you forget one of them or if you use upper case, you will run into undefined behavior.
 --          2. Start each line that contains an actual menu item (multi- or single-select) with a Space character,
 --             otherwise you will experience visual glitches.
-constant OPTM_SIZE         : natural := 45;  -- amount of items including empty lines:
+constant OPTM_SIZE         : natural := 48;  -- amount of items including empty lines:
                                              -- needs to be equal to the number of lines in OPTM_ITEMS and amount of items in OPTM_GROUPS
                                              -- IMPORTANT: If SAVE_SETTINGS is true and OPTM_SIZE changes: Make sure to re-generate and
                                              -- and re-distribute the config file. You can make a new one using M2M/tools/make_config.sh
@@ -337,7 +337,7 @@ constant OPTM_SIZE         : natural := 45;  -- amount of items including empty 
 -- Net size of the Options menu on the screen in characters (excluding the frame, which is hardcoded to two characters)
 -- Without submenus: Use OPTM_SIZE as height, otherwise count how large the actually visible main menu is.
 constant OPTM_DX           : natural := 23;
-constant OPTM_DY           : natural := 21;
+constant OPTM_DY           : natural := 25;
 
 constant OPTM_ITEMS : string :=
    " Mega800 \n"            &
@@ -388,6 +388,9 @@ constant OPTM_ITEMS : string :=
    " Keyboard: Atari\n"     &
    " Keyboard: MEGA65\n"    &
    "\n"                     &
+   " PAL\n"                 &
+   " Clip sides\n"          &
+   "\n"                     &
    " Close Menu\n";
 
 -- define your own constants here and choose meaningful names
@@ -408,6 +411,8 @@ constant OPTM_G_LOAD_ATARI_10K    : integer := 9;
 constant OPTM_G_KEYBOARD          : integer := 10;
 constant OPTM_G_LOAD_ATARI_BASIC  : integer := 11;
 constant OPTM_G_LOAD_ATARI_XEX    : integer := 12;
+constant OPTM_G_PAL               : integer := 13;
+constant OPTM_G_CLIP_SIDES        : integer := 14;
 
 -- !!! DO NOT TOUCH !!!
 type OPTM_GTYPE is array (0 to OPTM_SIZE - 1) of integer range 0 to 2**OPTM_GTC- 1;
@@ -474,7 +479,12 @@ constant OPTM_GROUPS       : OPTM_GTYPE := (   OPTM_G_TEXT + OPTM_G_HEADLINE,
                                             
                                                OPTM_G_KEYBOARD,
                                                OPTM_G_KEYBOARD + OPTM_G_STDSEL,
-                                            
+
+                                               OPTM_G_LINE,
+
+                                               OPTM_G_PAL + OPTM_G_SINGLESEL + OPTM_G_STDSEL,
+                                               OPTM_G_CLIP_SIDES + OPTM_G_SINGLESEL,
+
                                                OPTM_G_LINE,
                                                OPTM_G_CLOSE
                                   );

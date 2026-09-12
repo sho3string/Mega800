@@ -41,6 +41,8 @@ constant C_MENU_OS_LOAD_10K    : natural := 36;
 constant C_MENU_BASIC_LOAD     : natural := 37;
 constant C_MENU_KBD_ATARI      : natural := 41;
 constant C_MENU_KBD_MEGA65     : natural := 42;
+constant C_MENU_PAL            : natural := 44;
+constant C_MENU_CLIP_SIDES     : natural := 45;
 
 ----------------------------------------------------------------------------------------------------------
 -- QNICE Firmware
