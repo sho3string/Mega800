@@ -44,6 +44,11 @@ use ieee.numeric_std.all;
 library work;
 use work.video_modes_pkg.all;
 use work.globals.all;
+use work.vdrives_pkg.all;
+
+library xpm;
+use xpm.vcomponents.xpm_cdc_single;
+use xpm.vcomponents.xpm_cdc_array_single;
 
 entity main is
    generic (
@@ -124,6 +129,13 @@ entity main is
       pot2_x_i                : in  std_logic_vector(7 downto 0);
       pot2_y_i                : in  std_logic_vector(7 downto 0);
       
+      atari_qnice_clk_i       : in  std_logic;
+      atari_qnice_addr_i      : in  std_logic_vector(27 downto 0);
+      atari_qnice_data_i      : in  std_logic_vector(15 downto 0);
+      atari_qnice_data_o      : out std_logic_vector(15 downto 0);
+      atari_qnice_ce_i        : in  std_logic;
+      atari_qnice_we_i        : in  std_logic;
+      
       osm_control_i           : in  std_logic_vector(255 downto 0);
       rtc_i                   : in  std_logic_vector(64 downto 0)
    );
@@ -171,6 +183,8 @@ signal sio_irq             : std_logic;
 
 signal uart_data_read      : std_logic_vector(15 downto 0);
 
+signal vdrives_mounted     : std_logic_vector(G_VDNUM - 1 downto 0);
+signal disk_change         : std_logic_vector(G_VDNUM - 1 downto 0);
 signal cache_dirty         : std_logic_vector(G_VDNUM - 1 downto 0);
 signal prevent_reset       : std_logic;
 
@@ -184,6 +198,45 @@ signal os_800_16k          : std_logic;
 
 signal mega65_kblayout     : std_logic;
 
+signal sd_buff_addr        : std_logic_vector(8 downto 0);
+signal sd_buff_dout        : std_logic_vector(7 downto 0);
+signal img_mounted         : std_logic_vector(G_VDNUM - 1 downto 0);
+signal img_readonly        : std_logic;
+signal img_size            : std_logic_vector(31 downto 0);
+signal img_type            : std_logic_vector(1 downto 0);
+
+signal sd_buff_din         : vd_vec_array(G_VDNUM - 1 downto 0)(7 downto 0);
+signal sd_buff_wr          : std_logic;
+
+signal sd_lba              : vd_vec_array(G_VDNUM - 1 downto 0)(31 downto 0);
+signal sd_ack              : vd_std_array(G_VDNUM - 1 downto 0);
+signal sd_rd               : vd_std_array(G_VDNUM - 1 downto 0);
+signal sd_wr               : vd_std_array(G_VDNUM - 1 downto 0);
+signal sd_blk_cnt          : vd_vec_array(G_VDNUM - 1 downto 0)(5 downto 0);
+
+signal pokeymax_config : std_logic_vector(38 downto 0);
+
+  
+type t_atr_test_state is (
+    ATR_IDLE,
+    ATR_READ_START,
+    ATR_WAIT_ACK_HIGH,
+    ATR_WAIT_ACK_LOW,
+    ATR_CHECK_HEADER,
+    ATR_DONE
+);
+
+type t_atr_test_buffer is array (0 to 511) of std_logic_vector(7 downto 0);
+signal atr_test_state       : t_atr_test_state := ATR_IDLE;
+signal atr_test_buffer      : t_atr_test_buffer;
+signal atr_header_ok        : std_logic := '0';
+
+-- disk-change/mounted state synchronized back into QNICE domain
+signal vdrive_event_main    : std_logic_vector(1 downto 0);
+signal vdrive_event_qnice   : std_logic_vector(1 downto 0);
+signal disk_change_qnice_d  : std_logic := '0';
+   
+
 -- kb constants
 constant m65_f1            : integer := 4;  -- OPTION
 constant m65_f3            : integer := 5;  -- SELECT
@@ -191,8 +244,6 @@ constant m65_f5            : integer := 6;  -- START
 constant m65_f7            : integer := 3;  -- RESET
 constant m65_f9            : integer := 68; -- HELP
 constant m65_restore       : integer := 75; -- Pause
-
-signal pokeymax_config     : std_logic_vector(38 downto 0);
 
 
 
@@ -232,10 +283,8 @@ begin
     audio_left_o     <= signed(atari_audio_l);
     audio_right_o    <= signed(atari_audio_r);
     
-    
-    
-   dma_data_o       <= dma_data_in;
-   dma_ready_o      <= dma_ready;
+    dma_data_o       <= dma_data_in;
+    dma_ready_o      <= dma_ready;
 
     video_vs_o     <= atari_vs;
     video_hs_o     <= atari_hs;
@@ -249,7 +298,6 @@ begin
     
     -- Keyboard mapping mode '0' = Atari positional, '1' = MEGA65 semantic.
     mega65_kblayout <= osm_control_i(C_MENU_KBD_MEGA65);
-    
     
    --------------------------------------------------------------------------------------------------
    -- Hard reset
@@ -406,6 +454,158 @@ begin
       JOY3                    => (others => '0'),
       JOY4                    => (others => '0')
    );
+   
+   i_vdrives : entity work.vdrives
+      generic map (
+         VDNUM       => G_VDNUM,
+         BLKSZ       => 2                    -- 1 = 256 bytes block size, 2 = 512 bytes blocksize
+      )
+      port map
+      (
+         clk_qnice_i              => atari_qnice_clk_i,
+         clk_core_i               => clk_main_i,
+         reset_core_i             => not reset_core_n,
+
+         -- Core clock domain
+         img_mounted_o            => img_mounted,
+         img_readonly_o           => img_readonly,
+         img_size_o               => img_size,
+         img_type_o               => img_type,
+         drive_mounted_o          => vdrives_mounted,
+         img_mounted_toggle_o     => disk_change,
+         -- Cache output signals: The dirty flags can be used to enforce data consistency
+         -- (for example by ignoring/delaying a reset or delaying a drive unmount/mount, etc.)
+         -- The flushing flags can be used to signal the fact that the caches are currently
+         -- flushing to the user, for example using a special color/signal for example
+         -- at the drive led
+         cache_dirty_o     => cache_dirty,
+         cache_flushing_o  => open,
+
+         -- QNICE clock domain
+         sd_lba_i          => sd_lba,
+         sd_blk_cnt_i      => sd_blk_cnt,
+         sd_rd_i           => sd_rd,
+         sd_wr_i           => sd_wr,
+         sd_ack_o          => sd_ack,
+
+         sd_buff_addr_o    => sd_buff_addr,
+         sd_buff_dout_o    => sd_buff_dout,
+         sd_buff_din_i     => sd_buff_din,
+         sd_buff_wr_o      => sd_buff_wr,
+
+         -- QNICE interface (MMIO, 4k-segmented)
+         -- qnice_addr is 28-bit because we have a 16-bit window selector and a 4k window: 65536*4096 = 268.435.456 = 2^28
+         qnice_addr_i      => atari_qnice_addr_i,
+         qnice_data_i      => atari_qnice_data_i,
+         qnice_data_o      => atari_qnice_data_o,
+         qnice_ce_i        => atari_qnice_ce_i,
+         qnice_we_i        => atari_qnice_we_i
+   ); -- i_vdrives
+   
+   vdrive_event_main(0) <= disk_change(0);
+   vdrive_event_main(1) <= vdrives_mounted(0);
+
+   i_vdrive_event_cdc : xpm_cdc_array_single
+       generic map (
+          WIDTH => 2
+       )
+       port map (
+          src_clk  => clk_main_i,
+          src_in   => vdrive_event_main,
+          dest_clk => atari_qnice_clk_i,
+          dest_out => vdrive_event_qnice
+       );
+       
+   atr_test_buffer_write : process(atari_qnice_clk_i)
+    begin
+       if rising_edge(atari_qnice_clk_i) then
+    
+          if sd_buff_wr = '1' then
+             atr_test_buffer(to_integer(unsigned(sd_buff_addr))) <= sd_buff_dout;
+          end if;
+    
+       end if;
+    end process;
+    
+    atr_vdrive_test : process(atari_qnice_clk_i)
+    begin
+       if rising_edge(atari_qnice_clk_i) then
+          -- defaults
+          sd_wr(0)      <= '0';
+          sd_buff_din(0) <= (others => '0');
+    
+          -- remember the previous mount-toggle state
+          disk_change_qnice_d <= vdrive_event_qnice(0);
+          case atr_test_state is
+             -------------------------------------------------------
+             -- Wait for a new disk image to be mounted
+             -------------------------------------------------------
+             when ATR_IDLE =>
+    
+                sd_rd(0)      <= '0';
+                sd_lba(0)     <= (others => '0');
+                sd_blk_cnt(0) <= (others => '0');
+                atr_header_ok <= '0';
+                -- disk_change is a toggle, not a pulse
+                if vdrive_event_qnice(0) /= disk_change_qnice_d then
+                   -- Ignore unmount events
+                   if vdrive_event_qnice(1) = '1' then
+                      atr_test_state <= ATR_READ_START;
+                   end if;
+                end if;
+             -------------------------------------------------------
+             -- Request one 512-byte block, LBA 0
+             -------------------------------------------------------
+             when ATR_READ_START =>
+                sd_lba(0)     <= x"00000000";
+                sd_blk_cnt(0) <= "000000";    -- blocks - 1 = 0 => one block
+                sd_rd(0)      <= '1';
+                atr_test_state <= ATR_WAIT_ACK_HIGH;
+    
+    
+             -------------------------------------------------------
+             -- Wait for QNICE to accept the request
+             -------------------------------------------------------
+             when ATR_WAIT_ACK_HIGH =>
+                if sd_ack(0) = '1' then
+                   atr_test_state <= ATR_WAIT_ACK_LOW;
+                end if;
+   
+             -------------------------------------------------------
+             -- Keep request asserted for whole transfer
+             -------------------------------------------------------
+             when ATR_WAIT_ACK_LOW =>
+                if sd_ack(0) = '0' then
+                   sd_rd(0) <= '0';
+                   atr_test_state <= ATR_CHECK_HEADER;
+                end if;
+ 
+             -------------------------------------------------------
+             -- ATR magic is little-endian $0296:
+             --
+             -- file byte 0 = $96
+             -- file byte 1 = $02
+             -------------------------------------------------------
+             when ATR_CHECK_HEADER =>
+    
+                if atr_test_buffer(0) = x"96" and
+                   atr_test_buffer(1) = x"02" then
+                   atr_header_ok <= '1';
+                else
+                   atr_header_ok <= '0';
+                end if;
+                atr_test_state <= ATR_DONE;
+             -------------------------------------------------------
+             -- Stay here until another disk-change event
+             -------------------------------------------------------
+             when ATR_DONE =>
+                sd_rd(0) <= '0';
+                if vdrive_event_qnice(0) /= disk_change_qnice_d then
+                   atr_test_state <= ATR_IDLE;
+                end if;
+          end case;
+       end if;
+    end process;
     
    
    i_keyboard : entity work.keyboard

@@ -347,6 +347,11 @@ signal xex_core_reset_main        : std_logic := '0';
 signal xex_core_pause_sync1       : std_logic := '0';
 signal xex_core_pause_main        : std_logic := '0';
 
+-- QNICE clock domain
+signal qnice_atari_ce             : std_logic;
+signal qnice_atari_we             : std_logic;
+signal qnice_atari_data           : std_logic_vector(15 downto 0);
+
 
 begin
 
@@ -528,6 +533,13 @@ begin
          pot2_x_i             => main_pot2_x_i,
          pot2_y_i             => main_pot2_y_i,
          
+         atari_qnice_clk_i    => qnice_clk_i,
+         atari_qnice_addr_i   => qnice_dev_addr_i,
+         atari_qnice_data_i   => qnice_dev_data_i,
+         atari_qnice_data_o   => qnice_atari_data,
+         atari_qnice_ce_i     => qnice_atari_ce,
+         atari_qnice_we_i     => qnice_atari_we,
+         
          osm_control_i        => main_osm_control_i,
          rtc_i                => main_rtc_i
 
@@ -590,7 +602,6 @@ begin
              ------------------------------------------------------------------
     
              if main_rst = '1' then
-    
                 atari_dma_req_seen        <= atari_dma_req_sync2;
                 atari_dma_req_main        <= '0';
                 atari_dma_ack_toggle_main <= atari_dma_req_sync2;    
@@ -601,8 +612,6 @@ begin
                 xex_core_reset_main   <= '0';
                 xex_core_pause_sync1  <= '0';
                 xex_core_pause_main   <= '0';
-    
-    
              else
     
                 ------------------------------------------------------------------
@@ -610,8 +619,6 @@ begin
                 --
                 -- The toggle crossing means each change represents exactly one
                 -- new transaction.
-                ------------------------------------------------------------------
-    
                 if atari_dma_req_main = '0' and
                    atari_dma_req_sync2 /= atari_dma_req_seen then
     
@@ -630,15 +637,11 @@ begin
     
                    atari_dma_readback_main <= atari_dma_data_from_main;
                    atari_dma_req_main <= '0';
-    
                    -- Toggle ACK back to the QNICE domain.
                    atari_dma_ack_toggle_main <=
                       not atari_dma_ack_toggle_main;
-    
                 end if;
-    
              end if;
-    
           end if;
    end process;
        
@@ -812,7 +815,6 @@ begin
                          rom_csr_written_qnice <= '0';
     
                       end if;
-    
                    end if;
     
                 when others =>

@@ -93,6 +93,36 @@
 -- MiSTer2MEGA65 done by sy2002 and MJoergen in 2021 and licensed under GPL v3
 -------------------------------------------------------------------------------------------------------------
 
+/*
+
+               M2M
+             vdrives
+          VDNUM=1 BLKSZ=2
+                 │
+           512-byte blocks
+                 │
+                 ▼
+      +----------------------+
+      | Atari ATR adapter    |
+      |                      |
+      | mount event          |
+      | read 16-byte header  |
+      | determine:           |
+      |   sector_size        |
+      |   sector_count       |
+      |                      |
+      | sector -> byte offs  |
+      | byte offs -> LBA     |
+      +----------------------+
+                 │
+                 ▼
+          SIO drive logic
+                 │
+              POKEY
+                 │
+              Atari
+*/
+
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -102,7 +132,7 @@ package vdrives_pkg is
    type vd_std_array is array(natural range <>) of std_logic;
    type vd_unsigned_array is array(natural range <>) of unsigned;
 
-   constant AW: natural := 13;   -- 14-bit
+   constant AW: natural := 8;   -- 14-bit
    constant DW: natural := 7;    -- 8-bit
 end package;
 
