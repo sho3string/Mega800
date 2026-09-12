@@ -282,6 +282,11 @@ signal qnice_basicrom_addr     : std_logic_vector(12 downto 0);
 signal qnice_basicrom_data_to  : std_logic_vector(7 downto 0);
 signal qnice_basicrom_data_from: std_logic_vector(7 downto 0);
 
+-- D1 mounted ATR image buffer: 256 KiB
+signal qnice_d1buf_we          : std_logic;
+signal qnice_d1buf_addr        : std_logic_vector(17 downto 0);
+signal qnice_d1buf_data_from   : std_logic_vector(7 downto 0);
+
 signal main_osrom_addr         : std_logic_vector(13 downto 0);
 signal main_osrom_data         : std_logic_vector(7 downto 0);
 
@@ -341,6 +346,12 @@ signal qnice_atari_ce             : std_logic;
 signal qnice_atari_we             : std_logic;
 signal qnice_atari_data           : std_logic_vector(15 downto 0);
 
+signal atr_header_ok_main         : std_logic;
+signal atr_geometry_main          : std_logic_vector(1 downto 0);
+
+signal atr_sector_count_ok_main   : std_logic;
+
+signal atr_sector_count_1040_main : std_logic;
 
 begin
 
@@ -529,6 +540,11 @@ begin
          atari_qnice_ce_i     => qnice_atari_ce,
          atari_qnice_we_i     => qnice_atari_we,
          
+         atr_header_ok_o      => atr_header_ok_main,
+         atr_geometry_o       => atr_geometry_main,
+         atr_sector_count_ok_o=> atr_sector_count_ok_main,
+         atr_sector_count_1040_o=> atr_sector_count_1040_main,
+         
          osm_control_i        => main_osm_control_i,
          rtc_i                => main_rtc_i
 
@@ -701,27 +717,30 @@ begin
        variable qnice_csr_window        : std_logic;
        constant CRTROM_CSR_PT_OK        : std_logic_vector(15 downto 0) := x"0002";
     begin
-       qnice_dev_data_o   <= x"EEEE";
-       qnice_dev_wait_o   <= '0';
+       qnice_dev_data_o       <= x"EEEE";
+       qnice_dev_wait_o       <= '0';
     
-       qnice_osrom_we      <= '0';
-       qnice_osrom_addr    <= qnice_dev_addr_i(13 downto 0);
-       qnice_osrom_data_to <= qnice_dev_data_i(7 downto 0);
+       qnice_osrom_we         <= '0';
+       qnice_osrom_addr       <= qnice_dev_addr_i(13 downto 0);
+       qnice_osrom_data_to    <= qnice_dev_data_i(7 downto 0);
        
-       qnice_osrom10_we      <= '0';
-       qnice_osrom10_addr    <= (others => '0');
-       qnice_osrom10_data_to <= (others => '0');
+       qnice_osrom10_we       <= '0';
+       qnice_osrom10_addr     <= (others => '0');
+       qnice_osrom10_data_to  <= (others => '0');
        
        qnice_basicrom_we      <= '0';
        qnice_basicrom_addr    <= qnice_dev_addr_i(12 downto 0);
        qnice_basicrom_data_to <= qnice_dev_data_i(7 downto 0);
        
-       qnice_xex_ce <= '0';
-       qnice_xex_we <= '0';
+       qnice_d1buf_we         <= '0';
+       qnice_d1buf_addr       <= qnice_dev_addr_i(17 downto 0);
+       
+       qnice_xex_ce           <= '0';
+       qnice_xex_we           <= '0';
         
-       qnice_atari_ce <= '0';
-       qnice_atari_we <= '0';
-        
+       qnice_atari_ce         <= '0';
+       qnice_atari_we         <= '0';
+
 qnice_csr_window := '1'
    when qnice_dev_addr_i(27 downto 12) = x"FFFF"
    else '0';
@@ -753,6 +772,11 @@ qnice_csr_window := '1'
               qnice_dev_data_o          <= CRTROM_CSR_PT_OK when qnice_csr_window else
                                            x"00" & qnice_basicrom_data_from;
               qnice_basicrom_data_to    <= qnice_dev_data_i(7 downto 0);
+              
+           when C_DEV_ATARI_D1_BUFFER =>
+               qnice_d1buf_addr <= qnice_dev_addr_i(17 downto 0);
+               qnice_d1buf_we   <= qnice_dev_we_i;
+               qnice_dev_data_o <= x"00" & qnice_d1buf_data_from;
               
            when C_VD_DEVICE =>
                qnice_atari_ce   <= qnice_dev_ce_i;
@@ -929,6 +953,38 @@ qnice_csr_window := '1'
           q_b        => qnice_basicrom_data_from
    );
    
+---------------------------------------------------------------------------------------------
+-- D1 mounted ATR image buffer
+--
+-- QNICE/M2M loads the complete mounted disk image here.
+-- vdrives subsequently services block requests from this image buffer.
+-- 18 address bits = 256 KiB.
+---------------------------------------------------------------------------------------------
+
+   d1_mount_buf_ram : entity work.dualport_2clk_ram
+       generic map (
+          ADDR_WIDTH => 18,
+          DATA_WIDTH => 8,
+          FALLING_A  => true,
+          FALLING_B  => false
+       )
+       port map (
+          -- QNICE side
+          clock_a    => qnice_clk_i,
+          address_a  => qnice_d1buf_addr,
+          data_a     => qnice_dev_data_i(7 downto 0),
+          wren_a     => qnice_d1buf_we,
+          q_a        => qnice_d1buf_data_from,
+    
+          -- No direct Atari-side access.
+          -- vdrives receives requested blocks through its own buffer interface.
+          clock_b    => main_clk,
+          address_b  => (others => '0'),
+          data_b     => (others => '0'),
+          wren_b     => '0',
+          q_b        => open
+    );
+   
    i_xex_loader : entity work.xex_loader
    port map (
       qnice_clk_i       => qnice_clk_i,
@@ -980,9 +1036,17 @@ qnice_csr_window := '1'
    -- a) In case that this is handled in main.vhd, you need to add the appropriate ports to i_main
    -- b) You might want to change the drive led's color (just like the C64 core does) as long as
    --    the cache is dirty (i.e. as long as the write process is not finished, yet)
-   main_drive_led_o     <= '0';
-   main_drive_led_col_o <= x"00FF00";  -- 24-bit RGB value for the led
-
-
+   --main_drive_led_o     <= '0';
+   --main_drive_led_col_o <= x"00FF00";  -- 24-bit RGB value for the led
+   
+   main_drive_led_o <= atr_header_ok_main;
+   
+   main_drive_led_col_o <=
+   x"FFFF00" when atr_sector_count_512_main  = '1' else -- 512: yellow
+   x"00FF00" when atr_sector_count_ok_main   = '1' else -- 720: green
+   x"0000FF" when atr_sector_count_1040_main = '1' else -- 1040: blue
+   x"FF0000";          
+   
+  
 end architecture synthesis;
 

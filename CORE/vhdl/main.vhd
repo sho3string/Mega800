@@ -136,6 +136,12 @@ entity main is
       atari_qnice_ce_i        : in  std_logic;
       atari_qnice_we_i        : in  std_logic;
       
+      atr_header_ok_o         : out std_logic;
+      atr_geometry_o          : out std_logic_vector(1 downto 0);
+      atr_sector_count_ok_o   : out std_logic;
+      atr_sector_count_512_o  : out std_logic;
+      atr_sector_count_1040_o : out std_logic;
+      
       osm_control_i           : in  std_logic_vector(255 downto 0);
       rtc_i                   : in  std_logic_vector(64 downto 0)
    );
@@ -177,9 +183,9 @@ signal sio_in              : std_logic;
 signal sio_out             : std_logic;
 signal sio_clkin           : std_logic;
 signal sio_cmd             : std_logic;
-signal sio_proc            : std_logic;
+--signal sio_proc            : std_logic;
 signal sio_motor           : std_logic;
-signal sio_irq             : std_logic;
+--signal sio_irq             : std_logic;
 
 signal uart_data_read      : std_logic_vector(15 downto 0);
 
@@ -214,7 +220,9 @@ signal sd_rd               : vd_std_array(G_VDNUM - 1 downto 0);
 signal sd_wr               : vd_std_array(G_VDNUM - 1 downto 0);
 signal sd_blk_cnt          : vd_vec_array(G_VDNUM - 1 downto 0)(5 downto 0);
 
-signal pokeymax_config : std_logic_vector(38 downto 0);
+signal atr_data_bytes      : unsigned(27 downto 0) := (others => '0');
+
+signal pokeymax_config     : std_logic_vector(38 downto 0);
 
   
 type t_atr_test_state is (
@@ -223,6 +231,8 @@ type t_atr_test_state is (
     ATR_WAIT_ACK_HIGH,
     ATR_WAIT_ACK_LOW,
     ATR_CHECK_HEADER,
+    ATR_CALC_GEOMETRY,
+    ATR_CALC_GEOMETRY_2,
     ATR_DONE
 );
 
@@ -235,6 +245,12 @@ signal atr_header_ok        : std_logic := '0';
 signal vdrive_event_main    : std_logic_vector(1 downto 0);
 signal vdrive_event_qnice   : std_logic_vector(1 downto 0);
 signal disk_change_qnice_d  : std_logic := '0';
+signal disk_change_pending  : std_logic := '0';
+
+signal atr_valid            : std_logic := '0';
+signal atr_sector_size      : unsigned(15 downto 0) := (others => '0');
+signal atr_paragraphs       : unsigned(23 downto 0) := (others => '0');
+signal atr_sector_count     : unsigned(23 downto 0) := (others => '0');
    
 
 -- kb constants
@@ -295,6 +311,26 @@ begin
     
     video_hblank_o <= atari_hblank;
     video_vblank_o <= atari_vblank;
+    
+    atr_header_ok_o<= atr_valid;
+    
+    atr_geometry_o <=
+   "01" when atr_sector_size = to_unsigned(128, 16) else
+   "10" when atr_sector_size = to_unsigned(256, 16) else
+   "11" when atr_sector_size = to_unsigned(512, 16) else
+   "00";
+   
+   atr_sector_count_ok_o <=
+   '1' when atr_sector_count = to_unsigned(720, atr_sector_count'length)
+   else '0';
+   
+   atr_sector_count_1040_o <=
+   '1' when atr_sector_count = to_unsigned(1040, atr_sector_count'length)
+   else '0';
+   
+   atr_sector_count_512_o <=
+   '1' when atr_sector_count = to_unsigned(512, atr_sector_count'length)
+   else '0';
     
     -- Keyboard mapping mode '0' = Atari positional, '1' = MEGA65 semantic.
     mega65_kblayout <= osm_control_i(C_MENU_KBD_MEGA65);
@@ -426,9 +462,9 @@ begin
       SIO_OUT                 => sio_out,
       SIO_CLKIN               => '1',
       SIO_CMD                 => sio_cmd,
-      SIO_PROC                => sio_proc,
+      SIO_PROC                => '1',
       SIO_MOTOR               => sio_motor,
-      SIO_IRQ                 => sio_irq,
+      SIO_IRQ                 => '1',
 
       CPU_HALT                => cpu_halt,
 
@@ -533,6 +569,11 @@ begin
           -- defaults
           sd_wr(0)      <= '0';
           sd_buff_din(0) <= (others => '0');
+          
+          -- Latch a disk-change event until the FSM has consumed it.
+          if vdrive_event_qnice(0) /= disk_change_qnice_d then
+            disk_change_pending <= '1';
+          end if;
     
           -- remember the previous mount-toggle state
           disk_change_qnice_d <= vdrive_event_qnice(0);
@@ -541,17 +582,20 @@ begin
              -- Wait for a new disk image to be mounted
              -------------------------------------------------------
              when ATR_IDLE =>
-    
-                sd_rd(0)      <= '0';
-                sd_lba(0)     <= (others => '0');
-                sd_blk_cnt(0) <= (others => '0');
-                atr_header_ok <= '0';
-                -- disk_change is a toggle, not a pulse
-                if vdrive_event_qnice(0) /= disk_change_qnice_d then
-                   -- Ignore unmount events
+               sd_rd(0)      <= '0';
+               sd_lba(0)     <= (others => '0');
+               sd_blk_cnt(0) <= (others => '0');
+               atr_header_ok <= '0';
+            
+               -- disk_change is a toggle, not a pulse
+               if disk_change_pending = '1' then
+                   -- This event has now been consumed.
+                   disk_change_pending <= '0';
+                   -- Ignore unmount events; start a new header read on mount.
                    if vdrive_event_qnice(1) = '1' then
                       atr_test_state <= ATR_READ_START;
                    end if;
+                
                 end if;
              -------------------------------------------------------
              -- Request one 512-byte block, LBA 0
@@ -567,18 +611,22 @@ begin
              -- Wait for QNICE to accept the request
              -------------------------------------------------------
              when ATR_WAIT_ACK_HIGH =>
-                if sd_ack(0) = '1' then
-                   atr_test_state <= ATR_WAIT_ACK_LOW;
-                end if;
+               if sd_ack(0) = '1' then
+                  -- Request has been accepted.
+                  -- Drop RD now so it cannot be interpreted as another request
+                  -- when ACK returns low.
+                  sd_rd(0) <= '0';
+            
+                  atr_test_state <= ATR_WAIT_ACK_LOW;
+               end if;
    
              -------------------------------------------------------
              -- Keep request asserted for whole transfer
              -------------------------------------------------------
              when ATR_WAIT_ACK_LOW =>
-                if sd_ack(0) = '0' then
-                   sd_rd(0) <= '0';
-                   atr_test_state <= ATR_CHECK_HEADER;
-                end if;
+               if sd_ack(0) = '0' then
+                  atr_test_state <= ATR_CHECK_HEADER;
+               end if;
  
              -------------------------------------------------------
              -- ATR magic is little-endian $0296:
@@ -587,25 +635,91 @@ begin
              -- file byte 1 = $02
              -------------------------------------------------------
              when ATR_CHECK_HEADER =>
-    
-                if atr_test_buffer(0) = x"96" and
-                   atr_test_buffer(1) = x"02" then
-                   atr_header_ok <= '1';
+
+               if atr_test_buffer(0) = x"96" and
+                  atr_test_buffer(1) = x"02" then
+            
+                  atr_valid <= '1';
+            
+                  -- bytes 4/5: sector size, little endian
+                atr_sector_size <=
+                   unsigned(atr_test_buffer(5)) & unsigned(atr_test_buffer(4));
+                
+                -- bytes 2/3 plus byte 6: paragraph count, little endian
+                atr_paragraphs <=
+                   unsigned(atr_test_buffer(6)) &
+                   unsigned(atr_test_buffer(3)) &
+                   unsigned(atr_test_buffer(2));
                 else
-                   atr_header_ok <= '0';
-                end if;
+                  atr_valid       <= '0';
+                  atr_sector_size <= (others => '0');
+                  atr_paragraphs  <= (others => '0');
+            
+               end if;
+            
+               atr_test_state <= ATR_CALC_GEOMETRY;
+             
+             when ATR_CALC_GEOMETRY =>
+
+               if atr_valid = '1' then
+                  if atr_sector_size = to_unsigned(512, 16) then
+                     -- MiSTer:
+                     -- sector_count = paragraphs / 32
+                     atr_sector_count <=
+                        resize(
+                           shift_right(atr_paragraphs, 5),
+                           atr_sector_count'length
+                        );
+                  elsif atr_sector_size = to_unsigned(256, 16) then
+            
+                     -- First three sectors occupy 384 bytes = 24 paragraphs.
+                     --
+                     -- 3 + ((paragraphs * 16 - 384) / 256)
+                     -- =
+                     -- 3 + ((paragraphs - 24) / 16)
+                     atr_sector_count <=
+                        resize(
+                           shift_right(
+                              atr_paragraphs - to_unsigned(24, atr_paragraphs'length),
+                              4
+                           ) + 3,
+                           atr_sector_count'length
+                        );
+                  elsif atr_sector_size = to_unsigned(128, 16) then
+                     -- 3 + ((paragraphs * 16 - 384) / 128)
+                     -- =
+                     -- 3 + ((paragraphs - 24) / 8)
+                     atr_sector_count <=
+                        resize(
+                           shift_right(
+                              atr_paragraphs - to_unsigned(24, atr_paragraphs'length),
+                              3
+                           ) + 3,
+                           atr_sector_count'length
+                        );
+                  else
+                     atr_valid        <= '0';
+                     atr_sector_count <= (others => '0');
+                  end if;
+               else
+                  atr_sector_count <= (others => '0');
+               end if;
+               atr_test_state <= ATR_DONE;
+             when ATR_CALC_GEOMETRY_2 =>
                 atr_test_state <= ATR_DONE;
              -------------------------------------------------------
              -- Stay here until another disk-change event
              -------------------------------------------------------
              when ATR_DONE =>
-                sd_rd(0) <= '0';
-                if vdrive_event_qnice(0) /= disk_change_qnice_d then
-                   atr_test_state <= ATR_IDLE;
-                end if;
-          end case;
-       end if;
-    end process;
+               sd_rd(0) <= '0';
+               -- A disk-change event is waiting.
+               -- Return to IDLE, which will consume it.
+               if disk_change_pending = '1' then
+                  atr_test_state <= ATR_IDLE;
+               end if;
+              end case;
+           end if;
+           end process;
     
    
    i_keyboard : entity work.keyboard
