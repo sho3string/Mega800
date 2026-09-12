@@ -245,17 +245,6 @@ signal atari_os_rom           : std_logic_vector(1 downto 0);
 -- qnice_clk
 ---------------------------------------------------------------------------------------------
 
----------------------------------------------------------------------------------------------
--- Democore & example stuff: Delete before starting to port your own core
----------------------------------------------------------------------------------------------
-
-
-
--- QNICE clock domain
-signal qnice_demo_vd_data_o    : std_logic_vector(15 downto 0);
-signal qnice_demo_vd_ce        : std_logic;
-signal qnice_demo_vd_we        : std_logic;
-
 signal main_video_red          : std_logic_vector(7 downto 0);
 signal main_video_green        : std_logic_vector(7 downto 0);
 signal main_video_blue         : std_logic_vector(7 downto 0);
@@ -729,6 +718,13 @@ begin
        
        qnice_xex_ce <= '0';
        qnice_xex_we <= '0';
+        
+       qnice_atari_ce <= '0';
+       qnice_atari_we <= '0';
+        
+qnice_csr_window := '1'
+   when qnice_dev_addr_i(27 downto 12) = x"FFFF"
+   else '0';
        
        qnice_csr_window := '1' when qnice_dev_addr_i(27 downto 12) = x"FFFF" else '0';
 
@@ -757,6 +753,11 @@ begin
               qnice_dev_data_o          <= CRTROM_CSR_PT_OK when qnice_csr_window else
                                            x"00" & qnice_basicrom_data_from;
               qnice_basicrom_data_to    <= qnice_dev_data_i(7 downto 0);
+              
+           when C_VD_DEVICE =>
+               qnice_atari_ce   <= qnice_dev_ce_i;
+               qnice_atari_we   <= qnice_dev_we_i;
+               qnice_dev_data_o <= qnice_atari_data;
               
            when C_DEV_ATARI_DMA =>
                qnice_xex_ce       <= qnice_dev_ce_i;
@@ -982,51 +983,6 @@ begin
    main_drive_led_o     <= '0';
    main_drive_led_col_o <= x"00FF00";  -- 24-bit RGB value for the led
 
-   i_vdrives : entity work.vdrives
-      generic map (
-         VDNUM       => C_VDNUM
-      )
-      port map
-      (
-         clk_qnice_i       => qnice_clk_i,
-         clk_core_i        => main_clk,
-         reset_core_i      => main_reset_core_i,
-
-         -- Core clock domain
-         img_mounted_o     => open,
-         img_readonly_o    => open,
-         img_size_o        => open,
-         img_type_o        => open,
-         drive_mounted_o   => open,
-
-         -- Cache output signals: The dirty flags can be used to enforce data consistency
-         -- (for example by ignoring/delaying a reset or delaying a drive unmount/mount, etc.)
-         -- The flushing flags can be used to signal the fact that the caches are currently
-         -- flushing to the user, for example using a special color/signal for example
-         -- at the drive led
-         cache_dirty_o     => open,
-         cache_flushing_o  => open,
-
-         -- QNICE clock domain
-         sd_lba_i          => (others => (others => '0')),
-         sd_blk_cnt_i      => (others => (others => '0')),
-         sd_rd_i           => (others => '0'),
-         sd_wr_i           => (others => '0'),
-         sd_ack_o          => open,
-
-         sd_buff_addr_o    => open,
-         sd_buff_dout_o    => open,
-         sd_buff_din_i     => (others => (others => '0')),
-         sd_buff_wr_o      => open,
-
-         -- QNICE interface (MMIO, 4k-segmented)
-         -- qnice_addr is 28-bit because we have a 16-bit window selector and a 4k window: 65536*4096 = 268.435.456 = 2^28
-         qnice_addr_i      => qnice_dev_addr_i,
-         qnice_data_i      => qnice_dev_data_i,
-         qnice_data_o      => qnice_demo_vd_data_o,
-         qnice_ce_i        => qnice_demo_vd_ce,
-         qnice_we_i        => qnice_demo_vd_we
-      ); -- i_vdrives
 
 end architecture synthesis;
 
