@@ -350,7 +350,7 @@ signal atr_header_ok_main         : std_logic;
 signal atr_geometry_main          : std_logic_vector(1 downto 0);
 
 signal atr_sector_count_ok_main   : std_logic;
-
+signal atr_sector_count_512_main  : std_logic;
 signal atr_sector_count_1040_main : std_logic;
 
 begin
