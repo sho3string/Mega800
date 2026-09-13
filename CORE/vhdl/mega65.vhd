@@ -543,6 +543,7 @@ begin
          atr_header_ok_o      => atr_header_ok_main,
          atr_geometry_o       => atr_geometry_main,
          atr_sector_count_ok_o=> atr_sector_count_ok_main,
+         atr_sector_count_512_o => atr_sector_count_512_main,
          atr_sector_count_1040_o=> atr_sector_count_1040_main,
          
          osm_control_i        => main_osm_control_i,
