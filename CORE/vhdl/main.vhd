@@ -141,6 +141,7 @@ entity main is
       atr_sector_count_ok_o   : out std_logic;
       atr_sector_count_512_o  : out std_logic;
       atr_sector_count_1040_o : out std_logic;
+      atr_sector4_ok_o        : out std_logic;
       
       osm_control_i           : in  std_logic_vector(255 downto 0);
       rtc_i                   : in  std_logic_vector(64 downto 0)
@@ -188,6 +189,10 @@ signal sio_motor           : std_logic;
 --signal sio_irq             : std_logic;
 
 signal uart_data_read      : std_logic_vector(15 downto 0);
+signal sio_uart_addr       : std_logic_vector(4 downto 0) := (others => '0');
+signal sio_uart_enable     : std_logic := '0';
+signal sio_uart_wr         : std_logic := '0';
+signal sio_uart_data_write : std_logic_vector(7 downto 0) := (others => '0');
 
 signal vdrives_mounted     : std_logic_vector(G_VDNUM - 1 downto 0);
 signal disk_change         : std_logic_vector(G_VDNUM - 1 downto 0);
@@ -313,6 +318,7 @@ begin
     video_vblank_o <= atari_vblank;
     
     atr_header_ok_o<= atr_valid;
+    atr_sector4_ok_o <= atr_valid;
     
     atr_geometry_o <=
    "01" when atr_sector_size = to_unsigned(128, 16) else
@@ -390,10 +396,10 @@ begin
 
       HOT_KEYS                => open,
 
-      UART_ADDR               => (others => '0'),
-      UART_ENABLE             => '0',
-      UART_WR                 => '0',
-      UART_DATA_WRITE         => (others => '0'),
+      UART_ADDR               => sio_uart_addr,
+      UART_ENABLE             => sio_uart_enable,
+      UART_WR                 => sio_uart_wr,
+      UART_DATA_WRITE         => sio_uart_data_write,
       UART_DATA_READ          => uart_data_read,
 
       TAPE_DATA               => (others => '0'),
