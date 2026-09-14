@@ -194,6 +194,9 @@ signal sio_uart_enable     : std_logic := '0';
 signal sio_uart_wr         : std_logic := '0';
 signal sio_uart_data_write : std_logic_vector(7 downto 0) := (others => '0');
 
+signal sio_d1_start        : std_logic := '0';
+signal sio_status_seen     : std_logic := '0';
+
 signal vdrives_mounted     : std_logic_vector(G_VDNUM - 1 downto 0);
 signal disk_change         : std_logic_vector(G_VDNUM - 1 downto 0);
 signal cache_dirty         : std_logic_vector(G_VDNUM - 1 downto 0);
@@ -240,6 +243,17 @@ type t_atr_test_state is (
     ATR_CALC_GEOMETRY_2,
     ATR_DONE
 );
+
+type t_sio_rx_test_state is (
+    SIO_RXSTAT_READ,
+    SIO_RXSTAT_WAIT,
+    SIO_RXSTAT_CAPTURE,
+    SIO_RX_FETCH,
+    SIO_RX_FETCH_WAIT,
+    SIO_RX_CAPTURE
+);
+
+signal sio_rx_test_state    : t_sio_rx_test_state := SIO_RXSTAT_READ;
 
 type t_atr_test_buffer is array (0 to 511) of std_logic_vector(7 downto 0);
 signal atr_test_state       : t_atr_test_state := ATR_IDLE;
@@ -307,18 +321,18 @@ begin
     dma_data_o       <= dma_data_in;
     dma_ready_o      <= dma_ready;
 
-    video_vs_o     <= atari_vs;
-    video_hs_o     <= atari_hs;
-    video_red_o    <= atari_r;
-    video_green_o  <= atari_g;
-    video_blue_o   <= atari_b;
-    video_ce_o     <= atari_pixce;
+    video_vs_o       <= atari_vs;
+    video_hs_o       <= atari_hs;
+    video_red_o      <= atari_r;
+    video_green_o    <= atari_g;
+    video_blue_o     <= atari_b;
+    video_ce_o       <= atari_pixce;
     
-    video_hblank_o <= atari_hblank;
-    video_vblank_o <= atari_vblank;
+    video_hblank_o   <= atari_hblank;
+    video_vblank_o   <= atari_vblank;
     
-    atr_header_ok_o<= atr_valid;
-    atr_sector4_ok_o <= atr_valid;
+    atr_header_ok_o  <= atr_valid;
+    atr_sector4_ok_o <= atr_valid and sio_status_seen;
     
     atr_geometry_o <=
    "01" when atr_sector_size = to_unsigned(128, 16) else
@@ -496,6 +510,125 @@ begin
       JOY3                    => (others => '0'),
       JOY4                    => (others => '0')
    );
+   
+   sio_rx_test : process(clk_main_i)
+    begin
+        if rising_edge(clk_main_i) then
+    
+            -- defaults
+            sio_uart_enable     <= '0';
+            sio_uart_wr         <= '0';
+            sio_uart_data_write <= (others => '0');
+    
+            if reset_core_n = '0' then
+    
+                sio_rx_test_state <= SIO_RXSTAT_READ;
+                sio_d1_start      <= '0';
+                sio_status_seen   <= '0';
+                sio_uart_addr     <= (others => '0');
+    
+            else
+    
+                case sio_rx_test_state is
+    
+                    --------------------------------------------------------
+                    -- Read RX FIFO status
+                    --
+                    -- addr 3:
+                    -- bit 9 = full
+                    -- bit 8 = empty
+                    --------------------------------------------------------
+                    when SIO_RXSTAT_READ =>
+    
+                        sio_uart_addr   <= "00011";
+                        sio_uart_enable <= '1';
+    
+                        sio_rx_test_state <= SIO_RXSTAT_WAIT;
+    
+    
+                    --------------------------------------------------------
+                    -- sio_handler returns read data on the following cycle
+                    --------------------------------------------------------
+                    when SIO_RXSTAT_WAIT =>
+    
+                        sio_rx_test_state <= SIO_RXSTAT_CAPTURE;
+    
+    
+                    --------------------------------------------------------
+                    -- Something available?
+                    --------------------------------------------------------
+                    when SIO_RXSTAT_CAPTURE =>
+    
+                        if uart_data_read(8) = '0' then
+                            sio_rx_test_state <= SIO_RX_FETCH;
+                        else
+                            sio_rx_test_state <= SIO_RXSTAT_READ;
+                        end if;
+    
+    
+                    --------------------------------------------------------
+                    -- Fetch next RX FIFO entry
+                    --------------------------------------------------------
+                    when SIO_RX_FETCH =>
+    
+                        sio_uart_addr   <= "00010";
+                        sio_uart_enable <= '1';
+    
+                        sio_rx_test_state <= SIO_RX_FETCH_WAIT;
+    
+    
+                    --------------------------------------------------------
+                    -- Allow sio_handler registered DATA_OUT to update
+                    --------------------------------------------------------
+                    when SIO_RX_FETCH_WAIT =>
+    
+                        sio_rx_test_state <= SIO_RX_CAPTURE;
+    
+    
+                    --------------------------------------------------------
+                    -- RX FIFO entry:
+                    --
+                    -- bits 14..8 = command-byte position
+                    -- bits  7..0 = received byte
+                    --
+                    -- We deliberately do NO checksum validation here.
+                    --------------------------------------------------------
+                    when SIO_RX_CAPTURE =>
+    
+                        -- First command byte: D1 device ID = $31
+                        if uart_data_read(14 downto 8) =
+                           std_logic_vector(to_unsigned(1, 7)) then
+    
+                            if uart_data_read(7 downto 0) = x"31" then
+                                sio_d1_start <= '1';
+                            else
+                                sio_d1_start <= '0';
+                            end if;
+    
+                        -- Second command byte: command = $53
+                        elsif uart_data_read(14 downto 8) =
+                              std_logic_vector(to_unsigned(2, 7)) then
+    
+                            if sio_d1_start = '1' and
+                               uart_data_read(7 downto 0) = x"53" then
+    
+                                sio_status_seen <= '1';
+    
+                            end if;
+    
+                            sio_d1_start <= '0';
+    
+                        end if;
+    
+                        -- Keep draining the FIFO.
+                        sio_rx_test_state <= SIO_RXSTAT_READ;
+    
+                end case;
+    
+            end if;
+    
+        end if;
+    end process;
    
    i_vdrives : entity work.vdrives
       generic map (
