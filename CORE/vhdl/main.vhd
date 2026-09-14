@@ -205,6 +205,10 @@ signal sio_cmd_bytes       : t_sio_cmd_bytes;
 signal sio_cmd_pos_ok      : std_logic := '0';
 signal sio_expected_pos    : integer range 1 to 5 := 1;
 
+signal sio_status_tx_index      : integer range 0 to 4 := 0;
+signal sio_status_response_sent : std_logic := '0';
+signal sio_status_byte0         : std_logic_vector(7 downto 0);
+
 signal vdrives_mounted     : std_logic_vector(G_VDNUM - 1 downto 0);
 signal disk_change         : std_logic_vector(G_VDNUM - 1 downto 0);
 signal cache_dirty         : std_logic_vector(G_VDNUM - 1 downto 0);
@@ -277,7 +281,13 @@ type t_sio_rx_test_state is (
     SIO_COMPLETE_TXSTAT_READ,
     SIO_COMPLETE_TXSTAT_WAIT,
     SIO_COMPLETE_TXSTAT_CAPTURE,
-    SIO_SEND_COMPLETE
+    SIO_SEND_COMPLETE,
+    
+    SIO_STATUS_DELAY,
+    SIO_STATUS_TXSTAT_READ,
+    SIO_STATUS_TXSTAT_WAIT,
+    SIO_STATUS_TXSTAT_CAPTURE,
+    SIO_SEND_STATUS_BYTE
 );
 
 signal sio_rx_test_state    : t_sio_rx_test_state := SIO_RXSTAT_READ;
@@ -345,6 +355,37 @@ begin
     return std_logic_vector(r);
 end function;
 
+function sio_make_status0(
+    readonly     : std_logic;
+    sector_count : unsigned(23 downto 0);
+    sector_size  : unsigned(15 downto 0)
+) return std_logic_vector is
+    variable r : unsigned(7 downto 0);
+begin
+
+    -- MiSTer normal mounted-drive STATUS:
+    -- bit 4 = motor on
+    r := x"10";
+
+    -- bit 3 = write protected
+    if readonly = '1' then
+        r := r or x"08";
+    end if;
+
+    -- bit 7 = medium/non-standard density
+    if sector_count /= to_unsigned(720, sector_count'length) then
+        r := r or x"80";
+    end if;
+
+    -- bit 5 = sectors larger than 128 bytes
+    if sector_size /= to_unsigned(128, sector_size'length) then
+        r := r or x"20";
+    end if;
+
+    return std_logic_vector(r);
+
+end function;
+
 begin
 
    -- prevent data corruption by not allowing a soft reset to happen while the cache is still dirty
@@ -395,7 +436,7 @@ begin
     video_vblank_o   <= atari_vblank;
     
     atr_header_ok_o  <= atr_valid;
-    atr_sector4_ok_o <= atr_valid and sio_complete_sent;
+    atr_sector4_ok_o <= atr_valid and sio_status_response_sent;
     
     atr_geometry_o <=
    "01" when atr_sector_size = to_unsigned(128, 16) else
@@ -414,6 +455,13 @@ begin
    atr_sector_count_512_o <=
    '1' when atr_sector_count = to_unsigned(512, atr_sector_count'length)
    else '0';
+   
+   sio_status_byte0 <=
+    sio_make_status0(
+        img_readonly,
+        atr_sector_count,
+        atr_sector_size
+    );
     
     -- Keyboard mapping mode '0' = Atari positional, '1' = MEGA65 semantic.
     mega65_kblayout <= osm_control_i(C_MENU_KBD_MEGA65);
@@ -592,9 +640,12 @@ begin
                 sio_cmd_pos_ok    <= '0';
                 sio_expected_pos  <= 1;
             
-                sio_ack_sent        <= '0';
-                sio_ack_delay_count <=  0;
-                sio_complete_sent   <= '0';
+                sio_ack_sent             <= '0';
+                sio_complete_sent        <= '0';
+                sio_status_response_sent <= '0';
+                
+                sio_ack_delay_count      <= 0;
+                sio_status_tx_index      <= 0;
             
             else
     
@@ -858,13 +909,109 @@ begin
                     -- Send COMPLETE = $43 = 'C'
                     --------------------------------------------------------
                     when SIO_SEND_COMPLETE =>
-                    
+
                         sio_uart_addr       <= "00000";
                         sio_uart_data_write <= x"43";
                         sio_uart_wr         <= '1';
                     
-                        sio_complete_sent <= '1';
-                        sio_rx_test_state <= SIO_RXSTAT_READ;
+                        sio_complete_sent   <= '1';
+                    
+                        sio_ack_delay_count <= 0;
+                        sio_status_tx_index <= 0;
+                    
+                        sio_rx_test_state <= SIO_STATUS_DELAY;
+                        
+                    --------------------------------------------------------
+                    -- Atari SIO T3:
+                    -- wait 150 us after COMPLETE before response data
+                    --------------------------------------------------------
+                    when SIO_STATUS_DELAY =>
+                    
+                        if sio_ack_delay_count >=
+                           ((clk_main_speed_i / 20000) * 3) - 1 then
+                    
+                            sio_ack_delay_count <= 0;
+                            sio_rx_test_state   <= SIO_STATUS_TXSTAT_READ;
+                    
+                        else
+                    
+                            sio_ack_delay_count <= sio_ack_delay_count + 1;
+                    
+                        end if;
+                    --------------------------------------------------------
+                    -- Check TX FIFO before every response byte
+                    --------------------------------------------------------
+                    when SIO_STATUS_TXSTAT_READ =>
+                    
+                        sio_uart_addr   <= "00001";
+                        sio_uart_enable <= '1';
+                    
+                        sio_rx_test_state <= SIO_STATUS_TXSTAT_WAIT;
+                    
+                    
+                    when SIO_STATUS_TXSTAT_WAIT =>
+                    
+                        sio_rx_test_state <= SIO_STATUS_TXSTAT_CAPTURE;
+                    
+                    
+                    when SIO_STATUS_TXSTAT_CAPTURE =>
+                    
+                        if uart_data_read(9) = '0' then
+                            sio_rx_test_state <= SIO_SEND_STATUS_BYTE;
+                        else
+                            sio_rx_test_state <= SIO_STATUS_TXSTAT_READ;
+                        end if;
+                        
+                    --------------------------------------------------------
+                    -- STATUS response:
+                    --
+                    --   0 : drive/media flags
+                    --   1 : previous sector status = $FF
+                    --   2 : controller status = $E0
+                    --   3 : $00
+                    --   4 : checksum of bytes 0..3
+                    --------------------------------------------------------
+                    when SIO_SEND_STATUS_BYTE =>
+                    
+                        sio_uart_addr <= "00000";
+                        sio_uart_wr   <= '1';
+                    
+                        case sio_status_tx_index is
+                    
+                            when 0 =>
+                                sio_uart_data_write <= sio_status_byte0;
+                                sio_status_tx_index <= 1;
+                                sio_rx_test_state   <= SIO_STATUS_TXSTAT_READ;
+                    
+                            when 1 =>
+                                sio_uart_data_write <= x"FF";
+                                sio_status_tx_index <= 2;
+                                sio_rx_test_state   <= SIO_STATUS_TXSTAT_READ;
+                    
+                            when 2 =>
+                                sio_uart_data_write <= x"E0";
+                                sio_status_tx_index <= 3;
+                                sio_rx_test_state   <= SIO_STATUS_TXSTAT_READ;
+                    
+                            when 3 =>
+                                sio_uart_data_write <= x"00";
+                                sio_status_tx_index <= 4;
+                                sio_rx_test_state   <= SIO_STATUS_TXSTAT_READ;
+                    
+                            when 4 =>
+                                sio_uart_data_write <=
+                                    sio_checksum4(
+                                        sio_status_byte0,
+                                        x"FF",
+                                        x"E0",
+                                        x"00"
+                                    );
+                    
+                                sio_status_response_sent <= '1';
+                                sio_status_tx_index      <= 0;
+                                sio_rx_test_state        <= SIO_RXSTAT_READ;
+                    
+                        end case;
                     --------------------------------------------------------
                     -- Wait for command-release marker
                     --------------------------------------------------------
