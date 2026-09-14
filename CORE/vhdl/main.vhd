@@ -195,6 +195,9 @@ signal sio_uart_wr         : std_logic := '0';
 signal sio_uart_data_write : std_logic_vector(7 downto 0) := (others => '0');
 
 signal sio_status_seen     : std_logic := '0';
+signal sio_ack_sent        : std_logic := '0';
+signal sio_ack_delay_count : natural range 0 to 65535 := 0;
+signal sio_complete_sent   : std_logic := '0';
 
 type t_sio_cmd_bytes is array (0 to 3) of std_logic_vector(7 downto 0);
 
@@ -255,7 +258,26 @@ type t_sio_rx_test_state is (
     SIO_RXSTAT_CAPTURE,
     SIO_RX_FETCH,
     SIO_RX_FETCH_WAIT,
-    SIO_RX_CAPTURE
+    SIO_RX_CAPTURE,
+
+    SIO_CMDREL_STAT_READ,
+    SIO_CMDREL_STAT_WAIT,
+    SIO_CMDREL_STAT_CAPTURE,
+    SIO_CMDREL_FETCH,
+    SIO_CMDREL_FETCH_WAIT,
+    SIO_CMDREL_CAPTURE,
+
+    SIO_ACK_DELAY,
+    SIO_TXSTAT_READ,
+    SIO_TXSTAT_WAIT,
+    SIO_TXSTAT_CAPTURE,
+    SIO_SEND_ACK,
+    
+    SIO_COMPLETE_DELAY,
+    SIO_COMPLETE_TXSTAT_READ,
+    SIO_COMPLETE_TXSTAT_WAIT,
+    SIO_COMPLETE_TXSTAT_CAPTURE,
+    SIO_SEND_COMPLETE
 );
 
 signal sio_rx_test_state    : t_sio_rx_test_state := SIO_RXSTAT_READ;
@@ -373,7 +395,7 @@ begin
     video_vblank_o   <= atari_vblank;
     
     atr_header_ok_o  <= atr_valid;
-    atr_sector4_ok_o <= atr_valid and sio_status_seen;
+    atr_sector4_ok_o <= atr_valid and sio_complete_sent;
     
     atr_geometry_o <=
    "01" when atr_sector_size = to_unsigned(128, 16) else
@@ -562,14 +584,18 @@ begin
             sio_uart_data_write <= (others => '0');
     
             if reset_core_n = '0' then
-    
+
                 sio_rx_test_state <= SIO_RXSTAT_READ;
                 sio_status_seen   <= '0';
                 sio_uart_addr     <= (others => '0');
             
                 sio_cmd_pos_ok    <= '0';
                 sio_expected_pos  <= 1;
-    
+            
+                sio_ack_sent        <= '0';
+                sio_ack_delay_count <=  0;
+                sio_complete_sent   <= '0';
+            
             else
     
                 case sio_rx_test_state is    
@@ -632,20 +658,14 @@ begin
                     when SIO_RX_CAPTURE =>
                         case to_integer(unsigned(uart_data_read(14 downto 8))) is
         
-                            ----------------------------------------------------
-                            -- Byte 1: device
-                            ----------------------------------------------------
                             when 1 =>
                                 sio_cmd_bytes(0) <= uart_data_read(7 downto 0);
-                    
-                                -- Start of a new command
-                                sio_cmd_pos_ok   <= '1';
-                                sio_expected_pos <= 2;
-                    
-                    
-                            ----------------------------------------------------
-                            -- Byte 2: command
-                            ----------------------------------------------------
+                            
+                                sio_cmd_pos_ok    <= '1';
+                                sio_expected_pos  <= 2;
+                                sio_rx_test_state <= SIO_RXSTAT_READ;
+                            
+                            
                             when 2 =>
                                 if sio_cmd_pos_ok = '1' and sio_expected_pos = 2 then
                                     sio_cmd_bytes(1) <= uart_data_read(7 downto 0);
@@ -654,11 +674,10 @@ begin
                                     sio_cmd_pos_ok   <= '0';
                                     sio_expected_pos <= 1;
                                 end if;
-                    
-                    
-                            ----------------------------------------------------
-                            -- Byte 3: AUX1
-                            ----------------------------------------------------
+                            
+                                sio_rx_test_state <= SIO_RXSTAT_READ;
+                            
+                            
                             when 3 =>
                                 if sio_cmd_pos_ok = '1' and sio_expected_pos = 3 then
                                     sio_cmd_bytes(2) <= uart_data_read(7 downto 0);
@@ -667,11 +686,10 @@ begin
                                     sio_cmd_pos_ok   <= '0';
                                     sio_expected_pos <= 1;
                                 end if;
-                    
-                    
-                            ----------------------------------------------------
-                            -- Byte 4: AUX2
-                            ----------------------------------------------------
+                            
+                                sio_rx_test_state <= SIO_RXSTAT_READ;
+                            
+                            
                             when 4 =>
                                 if sio_cmd_pos_ok = '1' and sio_expected_pos = 4 then
                                     sio_cmd_bytes(3) <= uart_data_read(7 downto 0);
@@ -680,12 +698,14 @@ begin
                                     sio_cmd_pos_ok   <= '0';
                                     sio_expected_pos <= 1;
                                 end if;
-                    
-                    
+                            
+                                sio_rx_test_state <= SIO_RXSTAT_READ;
+           
                             ----------------------------------------------------
                             -- Byte 5: command checksum
                             ----------------------------------------------------
-                            when 5 =>                  
+                            when 5 =>
+                            
                                 if sio_cmd_pos_ok = '1' and
                                    sio_expected_pos = 5 and
                                    sio_cmd_bytes(0) = x"31" and
@@ -697,27 +717,215 @@ begin
                                            sio_cmd_bytes(2),
                                            sio_cmd_bytes(3)
                                        ) then
-                    
-                                    sio_status_seen <= '1';
-                    
-                                end if;                  
+                            
+                                    sio_status_seen   <= '1';
+                                    sio_rx_test_state <= SIO_CMDREL_STAT_READ;
+                            
+                                else
+                            
+                                    sio_rx_test_state <= SIO_RXSTAT_READ;
+                            
+                                end if;
+                            
                                 sio_cmd_pos_ok   <= '0';
                                 sio_expected_pos <= 1;
-                    
-                    
+          
                             ----------------------------------------------------
                             -- Command release marker / anything unexpected
                             ----------------------------------------------------
                             when others =>
-                                null;
+                                sio_rx_test_state <= SIO_RXSTAT_READ;
                     
-                            end case;                       
-                            sio_rx_test_state <= SIO_RXSTAT_READ;
-           
-                end case;
-    
+                            end case;    
+                    --------------------------------------------------------
+                    -- Atari SIO T5:
+                    -- wait at least 100 us before ACK
+                    --------------------------------------------------------
+                    when SIO_ACK_DELAY =>
+                    
+                        if sio_ack_delay_count >=
+                           (clk_main_speed_i / 10000) - 1 then
+                    
+                            sio_ack_delay_count <= 0;
+                            sio_rx_test_state   <= SIO_TXSTAT_READ;
+                    
+                        else
+                    
+                            sio_ack_delay_count <= sio_ack_delay_count + 1;
+                    
+                        end if;
+                    
+                    
+                    --------------------------------------------------------
+                    -- Read TX FIFO status
+                    --
+                    -- addr 1:
+                    -- bit 9 = TX FIFO full
+                    -- bit 8 = TX FIFO empty
+                    --------------------------------------------------------
+                    when SIO_TXSTAT_READ =>
+                    
+                        sio_uart_addr   <= "00001";
+                        sio_uart_enable <= '1';
+                    
+                        sio_rx_test_state <= SIO_TXSTAT_WAIT;
+                    
+                    
+                    --------------------------------------------------------
+                    -- sio_handler DATA_OUT is registered
+                    --------------------------------------------------------
+                    when SIO_TXSTAT_WAIT =>
+                    
+                        sio_rx_test_state <= SIO_TXSTAT_CAPTURE;
+                    
+                    
+                    --------------------------------------------------------
+                    -- Wait until TX FIFO has room
+                    --------------------------------------------------------
+                    when SIO_TXSTAT_CAPTURE =>
+                    
+                        if uart_data_read(9) = '0' then
+                            sio_rx_test_state <= SIO_SEND_ACK;
+                        else
+                            sio_rx_test_state <= SIO_TXSTAT_READ;
+                        end if;
+                    
+                    
+                    --------------------------------------------------------
+                    -- Send ACK = $41 = 'A'
+                    --------------------------------------------------------
+                    when SIO_SEND_ACK =>
+                        sio_uart_addr       <= "00000";
+                        sio_uart_data_write <= x"41";
+                        sio_uart_wr         <= '1';
+                    
+                        sio_ack_sent        <= '1';
+                        sio_ack_delay_count <= 0;
+                        sio_rx_test_state   <= SIO_COMPLETE_DELAY;
+                     
+                   --------------------------------------------------------
+                    -- Wait T5 minimum before COMPLETE.
+                    --
+                    -- MiSTer uses 600 us between ACK and COMPLETE.
+                    --------------------------------------------------------
+                    when SIO_COMPLETE_DELAY =>
+                    
+                        if sio_ack_delay_count >=
+                           ((clk_main_speed_i / 10000) * 6) - 1 then
+                    
+                            sio_ack_delay_count <= 0;
+                            sio_rx_test_state   <= SIO_COMPLETE_TXSTAT_READ;
+                    
+                        else
+                    
+                            sio_ack_delay_count <= sio_ack_delay_count + 1;
+                    
+                        end if;
+                    
+                    
+                    --------------------------------------------------------
+                    -- Read TX FIFO status before COMPLETE
+                    --------------------------------------------------------
+                    when SIO_COMPLETE_TXSTAT_READ =>
+                    
+                        sio_uart_addr   <= "00001";
+                        sio_uart_enable <= '1';
+                    
+                        sio_rx_test_state <= SIO_COMPLETE_TXSTAT_WAIT;
+                    
+                    
+                    --------------------------------------------------------
+                    -- sio_handler DATA_OUT is registered
+                    --------------------------------------------------------
+                    when SIO_COMPLETE_TXSTAT_WAIT =>
+                    
+                        sio_rx_test_state <= SIO_COMPLETE_TXSTAT_CAPTURE;
+                    
+                    
+                    --------------------------------------------------------
+                    -- Wait until TX FIFO has room
+                    --------------------------------------------------------
+                    when SIO_COMPLETE_TXSTAT_CAPTURE =>
+                    
+                        if uart_data_read(9) = '0' then
+                            sio_rx_test_state <= SIO_SEND_COMPLETE;
+                        else
+                            sio_rx_test_state <= SIO_COMPLETE_TXSTAT_READ;
+                        end if;
+                    
+                    
+                    --------------------------------------------------------
+                    -- Send COMPLETE = $43 = 'C'
+                    --------------------------------------------------------
+                    when SIO_SEND_COMPLETE =>
+                    
+                        sio_uart_addr       <= "00000";
+                        sio_uart_data_write <= x"43";
+                        sio_uart_wr         <= '1';
+                    
+                        sio_complete_sent <= '1';
+                        sio_rx_test_state <= SIO_RXSTAT_READ;
+                    --------------------------------------------------------
+                    -- Wait for command-release marker
+                    --------------------------------------------------------
+                    when SIO_CMDREL_STAT_READ =>
+                    
+                        sio_uart_addr   <= "00011";
+                        sio_uart_enable <= '1';
+                    
+                        sio_rx_test_state <= SIO_CMDREL_STAT_WAIT;
+                    
+                    
+                    --------------------------------------------------------
+                    -- Allow registered DATA_OUT to update
+                    --------------------------------------------------------
+                    when SIO_CMDREL_STAT_WAIT =>
+                    
+                        sio_rx_test_state <= SIO_CMDREL_STAT_CAPTURE;
+                    
+                    
+                    --------------------------------------------------------
+                    -- Wait until release marker is in RX FIFO
+                    --------------------------------------------------------
+                    when SIO_CMDREL_STAT_CAPTURE =>
+                    
+                        if uart_data_read(8) = '0' then
+                            sio_rx_test_state <= SIO_CMDREL_FETCH;
+                        else
+                            sio_rx_test_state <= SIO_CMDREL_STAT_READ;
+                        end if;
+                    
+                    
+                    --------------------------------------------------------
+                    -- Fetch command-release marker
+                    --------------------------------------------------------
+                    when SIO_CMDREL_FETCH =>
+                    
+                        sio_uart_addr   <= "00010";
+                        sio_uart_enable <= '1';
+                    
+                        sio_rx_test_state <= SIO_CMDREL_FETCH_WAIT;
+                    
+                    
+                    --------------------------------------------------------
+                    -- Allow registered DATA_OUT to update
+                    --------------------------------------------------------
+                    when SIO_CMDREL_FETCH_WAIT =>
+                    
+                        sio_rx_test_state <= SIO_CMDREL_CAPTURE;
+                    
+                    
+                    --------------------------------------------------------
+                    -- Release marker consumed.
+                    -- Start T5 timing now.
+                    --------------------------------------------------------
+                    when SIO_CMDREL_CAPTURE =>
+                    
+                        sio_ack_delay_count <= 0;
+                        sio_rx_test_state   <= SIO_ACK_DELAY;                
+                               
+                end case;   
             end if;
-    
         end if;
     end process;
    
