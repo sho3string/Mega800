@@ -194,8 +194,13 @@ signal sio_uart_enable     : std_logic := '0';
 signal sio_uart_wr         : std_logic := '0';
 signal sio_uart_data_write : std_logic_vector(7 downto 0) := (others => '0');
 
-signal sio_d1_start        : std_logic := '0';
 signal sio_status_seen     : std_logic := '0';
+
+type t_sio_cmd_bytes is array (0 to 3) of std_logic_vector(7 downto 0);
+
+signal sio_cmd_bytes       : t_sio_cmd_bytes;
+signal sio_cmd_pos_ok      : std_logic := '0';
+signal sio_expected_pos    : integer range 1 to 5 := 1;
 
 signal vdrives_mounted     : std_logic_vector(G_VDNUM - 1 downto 0);
 signal disk_change         : std_logic_vector(G_VDNUM - 1 downto 0);
@@ -280,7 +285,43 @@ constant m65_f7            : integer := 3;  -- RESET
 constant m65_f9            : integer := 68; -- HELP
 constant m65_restore       : integer := 75; -- Pause
 
+function sio_checksum4(
+    b0 : std_logic_vector(7 downto 0);
+    b1 : std_logic_vector(7 downto 0);
+    b2 : std_logic_vector(7 downto 0);
+    b3 : std_logic_vector(7 downto 0)
+) return std_logic_vector is
+    variable sum : unsigned(8 downto 0);
+    variable r   : unsigned(7 downto 0);
+begin
+    r := (others => '0');
 
+    sum := ('0' & r) + unsigned(b0);
+    r := sum(7 downto 0);
+    if sum(8) = '1' then
+        r := r + 1;
+    end if;
+
+    sum := ('0' & r) + unsigned(b1);
+    r := sum(7 downto 0);
+    if sum(8) = '1' then
+        r := r + 1;
+    end if;
+
+    sum := ('0' & r) + unsigned(b2);
+    r := sum(7 downto 0);
+    if sum(8) = '1' then
+        r := r + 1;
+    end if;
+
+    sum := ('0' & r) + unsigned(b3);
+    r := sum(7 downto 0);
+    if sum(8) = '1' then
+        r := r + 1;
+    end if;
+
+    return std_logic_vector(r);
+end function;
 
 begin
 
@@ -523,14 +564,15 @@ begin
             if reset_core_n = '0' then
     
                 sio_rx_test_state <= SIO_RXSTAT_READ;
-                sio_d1_start      <= '0';
                 sio_status_seen   <= '0';
                 sio_uart_addr     <= (others => '0');
+            
+                sio_cmd_pos_ok    <= '0';
+                sio_expected_pos  <= 1;
     
             else
     
-                case sio_rx_test_state is
-    
+                case sio_rx_test_state is    
                     --------------------------------------------------------
                     -- Read RX FIFO status
                     --
@@ -539,26 +581,22 @@ begin
                     -- bit 8 = empty
                     --------------------------------------------------------
                     when SIO_RXSTAT_READ =>
-    
                         sio_uart_addr   <= "00011";
                         sio_uart_enable <= '1';
     
                         sio_rx_test_state <= SIO_RXSTAT_WAIT;
-    
-    
+
                     --------------------------------------------------------
                     -- sio_handler returns read data on the following cycle
                     --------------------------------------------------------
-                    when SIO_RXSTAT_WAIT =>
-    
+                    when SIO_RXSTAT_WAIT =>  
                         sio_rx_test_state <= SIO_RXSTAT_CAPTURE;
     
     
                     --------------------------------------------------------
                     -- Something available?
                     --------------------------------------------------------
-                    when SIO_RXSTAT_CAPTURE =>
-    
+                    when SIO_RXSTAT_CAPTURE =>    
                         if uart_data_read(8) = '0' then
                             sio_rx_test_state <= SIO_RX_FETCH;
                         else
@@ -569,8 +607,7 @@ begin
                     --------------------------------------------------------
                     -- Fetch next RX FIFO entry
                     --------------------------------------------------------
-                    when SIO_RX_FETCH =>
-    
+                    when SIO_RX_FETCH =>   
                         sio_uart_addr   <= "00010";
                         sio_uart_enable <= '1';
     
@@ -580,8 +617,7 @@ begin
                     --------------------------------------------------------
                     -- Allow sio_handler registered DATA_OUT to update
                     --------------------------------------------------------
-                    when SIO_RX_FETCH_WAIT =>
-    
+                    when SIO_RX_FETCH_WAIT =>    
                         sio_rx_test_state <= SIO_RX_CAPTURE;
     
     
@@ -591,38 +627,93 @@ begin
                     -- bits 14..8 = command-byte position
                     -- bits  7..0 = received byte
                     --
-                    -- We deliberately do NO checksum validation here.
+                    -- Capture complete command and validate its checksum.
                     --------------------------------------------------------
                     when SIO_RX_CAPTURE =>
-    
-                        -- First command byte: D1 device ID = $31
-                        if uart_data_read(14 downto 8) =
-                           std_logic_vector(to_unsigned(1, 7)) then
-    
-                            if uart_data_read(7 downto 0) = x"31" then
-                                sio_d1_start <= '1';
-                            else
-                                sio_d1_start <= '0';
-                            end if;
-    
-                        -- Second command byte: command = $53
-                        elsif uart_data_read(14 downto 8) =
-                              std_logic_vector(to_unsigned(2, 7)) then
-    
-                            if sio_d1_start = '1' and
-                               uart_data_read(7 downto 0) = x"53" then
-    
-                                sio_status_seen <= '1';
-    
-                            end if;
-    
-                            sio_d1_start <= '0';
-    
-                        end if;
-    
-                        -- Keep draining the FIFO.
-                        sio_rx_test_state <= SIO_RXSTAT_READ;
-    
+                        case to_integer(unsigned(uart_data_read(14 downto 8))) is
+        
+                            ----------------------------------------------------
+                            -- Byte 1: device
+                            ----------------------------------------------------
+                            when 1 =>
+                                sio_cmd_bytes(0) <= uart_data_read(7 downto 0);
+                    
+                                -- Start of a new command
+                                sio_cmd_pos_ok   <= '1';
+                                sio_expected_pos <= 2;
+                    
+                    
+                            ----------------------------------------------------
+                            -- Byte 2: command
+                            ----------------------------------------------------
+                            when 2 =>
+                                if sio_cmd_pos_ok = '1' and sio_expected_pos = 2 then
+                                    sio_cmd_bytes(1) <= uart_data_read(7 downto 0);
+                                    sio_expected_pos <= 3;
+                                else
+                                    sio_cmd_pos_ok   <= '0';
+                                    sio_expected_pos <= 1;
+                                end if;
+                    
+                    
+                            ----------------------------------------------------
+                            -- Byte 3: AUX1
+                            ----------------------------------------------------
+                            when 3 =>
+                                if sio_cmd_pos_ok = '1' and sio_expected_pos = 3 then
+                                    sio_cmd_bytes(2) <= uart_data_read(7 downto 0);
+                                    sio_expected_pos <= 4;
+                                else
+                                    sio_cmd_pos_ok   <= '0';
+                                    sio_expected_pos <= 1;
+                                end if;
+                    
+                    
+                            ----------------------------------------------------
+                            -- Byte 4: AUX2
+                            ----------------------------------------------------
+                            when 4 =>
+                                if sio_cmd_pos_ok = '1' and sio_expected_pos = 4 then
+                                    sio_cmd_bytes(3) <= uart_data_read(7 downto 0);
+                                    sio_expected_pos <= 5;
+                                else
+                                    sio_cmd_pos_ok   <= '0';
+                                    sio_expected_pos <= 1;
+                                end if;
+                    
+                    
+                            ----------------------------------------------------
+                            -- Byte 5: command checksum
+                            ----------------------------------------------------
+                            when 5 =>                  
+                                if sio_cmd_pos_ok = '1' and
+                                   sio_expected_pos = 5 and
+                                   sio_cmd_bytes(0) = x"31" and
+                                   sio_cmd_bytes(1) = x"53" and
+                                   uart_data_read(7 downto 0) =
+                                       sio_checksum4(
+                                           sio_cmd_bytes(0),
+                                           sio_cmd_bytes(1),
+                                           sio_cmd_bytes(2),
+                                           sio_cmd_bytes(3)
+                                       ) then
+                    
+                                    sio_status_seen <= '1';
+                    
+                                end if;                  
+                                sio_cmd_pos_ok   <= '0';
+                                sio_expected_pos <= 1;
+                    
+                    
+                            ----------------------------------------------------
+                            -- Command release marker / anything unexpected
+                            ----------------------------------------------------
+                            when others =>
+                                null;
+                    
+                            end case;                       
+                            sio_rx_test_state <= SIO_RXSTAT_READ;
+           
                 end case;
     
             end if;
