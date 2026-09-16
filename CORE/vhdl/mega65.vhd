@@ -328,6 +328,12 @@ signal atari_dma_req_main         : std_logic := '0';
 signal atari_dma_data_from_main   : std_logic_vector(7 downto 0);
 signal atari_dma_ready_main       : std_logic;
 
+signal atari_dma_launch_main      : std_logic := '0';
+
+signal atari_dma_addr_main        : std_logic_vector(25 downto 0);
+signal atari_dma_data_main        : std_logic_vector(7 downto 0);
+signal atari_dma_read_main        : std_logic;
+
 signal xex_loader_mode_qnice      : std_logic;
 signal xex_loader_mode_sync1      : std_logic := '0';
 signal xex_loader_mode_main       : std_logic := '0';
@@ -480,10 +486,10 @@ begin
          atari_basicrom_addr_o => main_basicrom_addr,
          atari_basicrom_data_i => main_basicrom_data,
          
-         dma_addr_i             => atari_dma_addr_qnice,
+         dma_addr_i             => atari_dma_addr_main,
          dma_req_i              => atari_dma_req_main,
-         dma_read_enable_i      => atari_dma_read_qnice,
-         dma_data_i             => atari_dma_data_qnice,
+         dma_read_enable_i      => atari_dma_read_main,
+         dma_data_i             => atari_dma_data_main,
          dma_data_o             => atari_dma_data_from_main,
          dma_ready_o            => atari_dma_ready_main,
 
@@ -587,7 +593,8 @@ begin
        end if;
     end process;
     
-      atari_dma_main_proc : process(main_clk)
+
+    atari_dma_main_proc : process(main_clk)
        begin
           if rising_edge(main_clk) then
     
@@ -612,8 +619,13 @@ begin
              if main_rst = '1' then
                 atari_dma_req_seen        <= atari_dma_req_sync2;
                 atari_dma_req_main        <= '0';
-                atari_dma_ack_toggle_main <= atari_dma_req_sync2;    
+                atari_dma_ack_toggle_main <= atari_dma_req_sync2;
                 atari_dma_readback_main   <= (others => '0');
+                atari_dma_launch_main     <= '0';
+            
+                atari_dma_addr_main       <= (others => '0');
+                atari_dma_data_main       <= (others => '0');
+                atari_dma_read_main       <= '0';
                 xex_loader_mode_sync1 <= '0';
                 xex_loader_mode_main  <= '0';
                 xex_core_reset_sync1  <= '0';
@@ -628,11 +640,23 @@ begin
                 -- The toggle crossing means each change represents exactly one
                 -- new transaction.
                 if atari_dma_req_main = '0' and
+                   atari_dma_launch_main = '0' and
                    atari_dma_req_sync2 /= atari_dma_req_seen then
-    
+                
                    atari_dma_req_seen <= atari_dma_req_sync2;
-                   atari_dma_req_main <= '1';
-    
+                
+                   atari_dma_addr_main <= atari_dma_addr_qnice;
+                   atari_dma_data_main <= atari_dma_data_qnice;
+                   atari_dma_read_main <= atari_dma_read_qnice;
+                
+                   atari_dma_launch_main <= '1';
+                
+                elsif atari_dma_launch_main = '1' then
+                
+                   -- One main_clk has elapsed since payload capture.
+                   atari_dma_launch_main <= '0';
+                   atari_dma_req_main    <= '1';
+                
                 end if;
     
     
@@ -651,7 +675,7 @@ begin
                 end if;
              end if;
           end if;
-   end process;
+     end process;
        
        
     
