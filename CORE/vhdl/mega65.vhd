@@ -541,12 +541,12 @@ begin
          atari_qnice_ce_i     => qnice_atari_ce,
          atari_qnice_we_i     => qnice_atari_we,
          
-         atr_header_ok_o      => atr_header_ok_main,
-         atr_geometry_o       => atr_geometry_main,
-         atr_sector_count_ok_o=> atr_sector_count_ok_main,
+         atr_header_ok_o        => atr_header_ok_main,
+         atr_geometry_o         => atr_geometry_main,
+         atr_sector_count_ok_o  => atr_sector_count_ok_main,
          atr_sector_count_512_o => atr_sector_count_512_main,
          atr_sector_count_1040_o=> atr_sector_count_1040_main,
-         atr_sector4_ok_o => atr_sector4_ok_main,
+         atr_sector4_ok_o       => atr_sector4_ok_main,
          
          osm_control_i        => main_osm_control_i,
          rtc_i                => main_rtc_i
@@ -1042,18 +1042,8 @@ qnice_csr_window := '1'
    --main_drive_led_o     <= '0';
    --main_drive_led_col_o <= x"00FF00";  -- 24-bit RGB value for the led
    
-   main_drive_led_o <= atr_header_ok_main;
-   
-   /*main_drive_led_col_o <=
-   x"FFFF00" when atr_sector_count_512_main  = '1' else -- 512: yellow
-   x"00FF00" when atr_sector_count_ok_main   = '1' else -- 720: green
-   x"0000FF" when atr_sector_count_1040_main = '1' else -- 1040: blue
-   x"FF0000";*/
-   
-   main_drive_led_col_o <=
-   x"00FF00" when atr_sector4_ok_main = '1' else  -- sector 4 reconstructed correctly
-   x"FF0000";                                     -- failed / not completed
-   
+   main_drive_led_o <= atr_sector4_ok_main;
+   main_drive_led_col_o <= x"FF0000";
   
 end architecture synthesis;
 

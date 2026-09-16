@@ -295,6 +295,8 @@ signal sio_read_failed        : std_logic := '0';
 
 signal sio_status_seen        : std_logic := '0';
 signal sio_read_seen          : std_logic := '0';
+signal sio_drive_activity     : std_logic := '0';
+signal sio_state_debug        : std_logic_vector(4 downto 0);
 
 ----------------------------------------------------------------------------
 -- Main-clock -> QNICE ATR sector request
@@ -610,8 +612,14 @@ begin
     video_hblank_o   <= atari_hblank;
     video_vblank_o   <= atari_vblank;
     
-    atr_header_ok_o  <= atr_valid;
-    atr_sector4_ok_o <= sio_read_seen;
+    -- RED: main SIO side is waiting for ATR completion
+    atr_sector4_ok_o <= sio_drive_activity;
+
+    atr_header_ok_o        <= atr_valid;
+    atr_sector_count_ok_o  <= '1' when
+       atr_sector_count /= 0
+    else '0';
+
     
     atr_geometry_o <=
    "01" when atr_sector_size = to_unsigned(128, 16) else
@@ -619,9 +627,6 @@ begin
    "11" when atr_sector_size = to_unsigned(512, 16) else
    "00";
    
-   atr_sector_count_ok_o <=
-   '1' when atr_sector_count = to_unsigned(720, atr_sector_count'length)
-   else '0';
    
    atr_sector_count_1040_o <=
    '1' when atr_sector_count = to_unsigned(1040, atr_sector_count'length)
@@ -1010,6 +1015,7 @@ begin
     
              sio_status_seen      <= '0';
              sio_read_seen        <= '0';
+             sio_drive_activity   <= '0';
     
              sio_cmd_bytes        <= (others => (others => '0'));
     
@@ -1027,11 +1033,13 @@ begin
                 ----------------------------------------------------------
     
                 when SIO_IDLE =>
+                   sio_drive_activity <= '0';
+                
                    sio_uart_addr   <= "00011";
                    sio_uart_enable <= '1';
-    
+                
                    sio_state <= SIO_RXSTAT_WAIT;
-    
+                    
     
                 when SIO_RXSTAT_WAIT =>
                    sio_state <= SIO_RXSTAT_CAPTURE;
@@ -1191,6 +1199,7 @@ begin
                                 std_logic_vector(sector_tmp);
                     
                              sio_command_kind <= SIO_COMMAND_READ;
+                             sio_drive_activity <= '1';
                     
                           else
                     
@@ -1458,7 +1467,7 @@ begin
                 when SIO_AFTER_COMPLETE =>
 
                    if sio_read_failed = '1' then
-                
+                      sio_drive_activity <= '0';
                       sio_state <= SIO_IDLE;
                 
                    else
@@ -1592,8 +1601,9 @@ begin
                    -- This proves a real ATR logical sector has gone:
                    --
                    -- vdrive -> ATR reader -> SIO TX FIFO.
-                   sio_read_seen <= '1';
-                   sio_state <= SIO_IDLE;
+                   sio_read_seen        <= '1';
+                   sio_drive_activity   <= '0';
+                   sio_state            <= SIO_IDLE;
     
     
                 ----------------------------------------------------------
@@ -2235,8 +2245,7 @@ begin
                -- Toggle completion only now, one QNICE clock later.
                -------------------------------------------------------
             
-               atr_done_toggle_qnice(0) <=
-                  not atr_done_toggle_qnice(0);
+               atr_done_toggle_qnice(0)  <= not atr_done_toggle_qnice(0);
                atr_sector_service_active <= '0';
                atr_test_state <= ATR_DONE;
                          -------------------------------------------------------
