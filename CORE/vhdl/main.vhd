@@ -1142,8 +1142,19 @@ begin
                          -------------------------------------------------
                 
                          if sio_cmd_bytes(1) = x"53" then
-                            sio_command_kind <= SIO_COMMAND_STATUS;
-                            sio_state        <= SIO_CMDREL_STAT_READ;
+
+                           if vdrives_mounted(0) = '1' and
+                              atr_valid_main = '1' then
+                        
+                              sio_command_kind <= SIO_COMMAND_STATUS;
+                        
+                           else
+                        
+                              sio_command_kind <= SIO_COMMAND_NONE;
+                        
+                           end if;
+                        
+                           sio_state <= SIO_CMDREL_STAT_READ;
                 
                 
                          -------------------------------------------------
@@ -1272,8 +1283,13 @@ begin
 
                 when SIO_CMDREL_CAPTURE =>
                    -- Release entry has now been consumed.
-                   -- Continue exactly as before.
-                   sio_state <= SIO_DIV_READ;
+                
+                   if sio_command_kind = SIO_COMMAND_NONE then
+                      -- No disk mounted: ignore the command completely.
+                      sio_state <= SIO_IDLE;
+                   else
+                      sio_state <= SIO_DIV_READ;
+                   end if;
 
 
                 ----------------------------------------------------------
