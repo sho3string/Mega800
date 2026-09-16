@@ -85,24 +85,35 @@ SUBMENU_SUMMARY XOR     R8, R8                  ; R8 = 0 = no custom string
 FILTER_FILES    INCRB
                 MOVE    R9, R0
 
-                ; Never filter directories
+                ; Never filter directories!
                 CMP     1, R9
                 RBRA    _FFILES_RET_0, Z
 
-                ; Only apply filtering to CRT/ROM/XEX loading
-                CMP     CTX_LOAD_ROM, R10
-                RBRA    _FFILES_RET_0, !Z
+                 ; Disk image browser: only allow .ATR files
+                CMP     CTX_MOUNT_DISKIMG, R10
+                RBRA    _FFILES_XEX, !Z
 
-                ; Only filter the "Load XEX" menu item
-                CMP     OPTM_G_LOAD_ATARI_XEX, R11
-                RBRA    _FFILES_RET_0, !Z
-
-                ; Only allow .XEX
-                MOVE    ATARI_XEXFILE, R9
+                MOVE    ATARI_ATRFILE, R9
                 RSUB    M2M$CHK_EXT, 1
                 RBRA    _FFILES_RET_0, C
 
                 ; Wrong extension: hide it
+                MOVE    1, R8
+                RBRA    _FFILES_RET, 1
+
+
+                ; XEX loader: only allow .XEX
+_FFILES_XEX     CMP     CTX_LOAD_ROM, R10
+                RBRA    _FFILES_RET_0, !Z
+
+                CMP     OPTM_G_LOAD_ATARI_XEX, R11
+                RBRA    _FFILES_RET_0, !Z
+
+                MOVE    ATARI_XEXFILE, R9
+                RSUB    M2M$CHK_EXT, 1
+                RBRA    _FFILES_RET_0, C
+
+                ; Wrong extension so hide it
                 MOVE    1, R8
                 RBRA    _FFILES_RET, 1
 
@@ -217,6 +228,7 @@ CUSTOM_MSG      XOR     R8, R8
 ; Add your core specific constants and strings here
 
 ATARI_XEXFILE     .ASCII_W ".XEX"
+ATARI_ATRFILE     .ASCII_W ".ATR"
 
 ; This needs to be the last thing before the "Variables" sections starts
 END_OF_ROM      .DW 0
