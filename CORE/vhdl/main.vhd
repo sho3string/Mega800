@@ -176,6 +176,20 @@ signal sdram_ready         : std_logic;
 signal dma_data_in         : std_logic_vector(7 downto 0);
 signal dma_ready           : std_logic;
 
+signal atr_boot_dma_active : std_logic := '0';
+signal atr_boot_dma_addr   : unsigned(15 downto 0) := (others => '0');
+signal atr_boot_dma_req    : std_logic := '0';
+signal atr_boot_reset      : std_logic := '0';
+signal atr_data_bytes      : unsigned(27 downto 0) := (others => '0');
+signal atr_boot_option_force : std_logic := '0';
+signal atari_option_force_in : std_logic;
+
+
+signal atari_dma_addr_mux  : std_logic_vector(25 downto 0);
+signal atari_dma_req_mux   : std_logic;
+signal atari_dma_read_mux  : std_logic;
+signal atari_dma_data_mux  : std_logic_vector(7 downto 0);
+
 signal tape_fifo_full      : std_logic;
 signal tape_fifo_empty     : std_logic;
 signal tape_active         : std_logic;
@@ -194,28 +208,150 @@ signal sio_uart_enable     : std_logic := '0';
 signal sio_uart_wr         : std_logic := '0';
 signal sio_uart_data_write : std_logic_vector(7 downto 0) := (others => '0');
 
-signal sio_status_seen     : std_logic := '0';
-signal sio_ack_sent        : std_logic := '0';
-signal sio_ack_delay_count : natural range 0 to 65535 := 0;
-signal sio_complete_sent   : std_logic := '0';
+type t_sio_cmd is array (0 to 4) of std_logic_vector(7 downto 0);
+signal sio_cmd_bytes       : t_sio_cmd := (others => (others => '0'));
 
-type t_sio_cmd_bytes is array (0 to 3) of std_logic_vector(7 downto 0);
+type t_sio_command_kind is (
+   SIO_COMMAND_NONE,
+   SIO_COMMAND_STATUS,
+   SIO_COMMAND_READ,
+   SIO_COMMAND_NAK
+);
 
-signal sio_cmd_bytes       : t_sio_cmd_bytes;
-signal sio_cmd_pos_ok      : std_logic := '0';
-signal sio_expected_pos    : integer range 1 to 5 := 1;
+type t_sio_state is (
+   SIO_IDLE,
 
-signal sio_status_tx_index      : integer range 0 to 4 := 0;
-signal sio_status_response_sent : std_logic := '0';
-signal sio_status_byte0         : std_logic_vector(7 downto 0);
+   SIO_RXSTAT_WAIT,
+   SIO_RXSTAT_CAPTURE,
+
+   SIO_RX_READ,
+   SIO_RX_WAIT,
+   SIO_RX_CAPTURE,
+
+   SIO_VALIDATE,
+
+   -- COMMAND-line release handling.
+   -- Command bytes 1..5 are validated first, then the
+   -- separate release FIFO entry is consumed.
+   SIO_CMDREL_STAT_READ,
+   SIO_CMDREL_STAT_WAIT,
+   SIO_CMDREL_STAT_CAPTURE,
+   SIO_CMDREL_FETCH,
+   SIO_CMDREL_FETCH_WAIT,
+   SIO_CMDREL_CAPTURE,
+  
+   SIO_DIV_READ,
+   SIO_DIV_WAIT,
+   SIO_DIV_CAPTURE,
+   SIO_DIV_WRITE,
+
+   SIO_DELAY_ACK,
+   SIO_AFTER_ACK,
+
+   SIO_ATR_WAIT,
+   SIO_ATR_SETTLE,
+
+   SIO_DELAY_COMPLETE,
+   SIO_AFTER_COMPLETE,
+
+   SIO_DELAY_DATA,
+
+   SIO_STATUS_SEND,
+   SIO_STATUS_SENT,
+
+   SIO_READ_SEND,
+   SIO_READ_SENT,
+   SIO_READ_CHECKSUM_SENT,
+
+   SIO_TXSTAT_READ,
+   SIO_TXSTAT_WAIT,
+   SIO_TXSTAT_CAPTURE,
+   SIO_TX_WRITE
+);
+
+signal sio_state              : t_sio_state := SIO_IDLE;
+signal sio_tx_return_state    : t_sio_state := SIO_IDLE;
+
+signal sio_command_kind       : t_sio_command_kind := SIO_COMMAND_NONE;
+
+signal sio_rx_index           : integer range 0 to 5 := 0;
+signal sio_cmd_pos_ok         : std_logic := '1';
+signal sio_collecting         : std_logic := '0';
+
+signal sio_rx_divisor         : std_logic_vector(7 downto 0) := (others => '0');
+
+signal sio_delay_count        : integer range 0 to 40000 := 0;
+signal sio_settle_count       : integer range 0 to 15 := 0;
+
+signal sio_tx_byte            : std_logic_vector(7 downto 0) := (others => '0');
+
+signal sio_status_byte0       : std_logic_vector(7 downto 0) := (others => '0');
+signal sio_status_index       : integer range 0 to 4 := 0;
+
+signal sio_read_index         : unsigned(9 downto 0) := (others => '0');
+signal sio_read_length        : unsigned(9 downto 0) := (others => '0');
+signal sio_read_checksum      : std_logic_vector(7 downto 0) := (others => '0');
+signal sio_read_failed        : std_logic := '0';
+
+signal sio_status_seen        : std_logic := '0';
+signal sio_read_seen          : std_logic := '0';
+
+----------------------------------------------------------------------------
+-- Main-clock -> QNICE ATR sector request
+----------------------------------------------------------------------------
+
+signal sio_atr_req_toggle_main  : std_logic_vector(0 downto 0) :=
+                                  (others => '0');
+signal sio_atr_req_toggle_qnice : std_logic_vector(0 downto 0);
+
+signal sio_atr_req_sector_main  : std_logic_vector(23 downto 0) :=
+                                  (others => '0');
+signal sio_atr_req_sector_qnice : std_logic_vector(23 downto 0);
+
+----------------------------------------------------------------------------
+-- QNICE -> main completion
+----------------------------------------------------------------------------
+
+signal atr_done_toggle_qnice    : std_logic_vector(0 downto 0) :=
+                                  (others => '0');
+signal atr_done_toggle_main     : std_logic_vector(0 downto 0);
+
+signal sio_atr_done_seen        : std_logic := '0';
+
+signal atr_result_meta_qnice    : std_logic_vector(10 downto 0);
+signal atr_result_meta_main     : std_logic_vector(10 downto 0);
+
+----------------------------------------------------------------------------
+-- ATR geometry QNICE -> main
+--
+-- [40:17] sector count
+-- [16:1]  sector size
+-- [0]     valid
+----------------------------------------------------------------------------
+
+signal atr_meta_qnice           : std_logic_vector(40 downto 0);
+signal atr_meta_main            : std_logic_vector(40 downto 0);
+
+signal atr_valid_main           : std_logic;
+signal atr_sector_size_main     : unsigned(15 downto 0);
+signal atr_sector_count_main    : unsigned(23 downto 0);
+
+signal atr_req_seen_qnice       : std_logic := '0';
+
+signal atr_sector_service_active : std_logic := '0';
+signal atr_sector_service_ok     : std_logic := '0';
+
+  
 
 signal vdrives_mounted     : std_logic_vector(G_VDNUM - 1 downto 0);
+signal vdrive_mounted_d    : std_logic := '0';
 signal disk_change         : std_logic_vector(G_VDNUM - 1 downto 0);
 signal cache_dirty         : std_logic_vector(G_VDNUM - 1 downto 0);
 signal prevent_reset       : std_logic;
 
 signal reset_core_n        : std_logic := '1';
 signal reset_core_int      : std_logic := '0';
+signal atr_boot_reset_count: natural range 0 to 65535 := 0;
 
 signal ps2_key             : std_logic_vector(10 downto 0);
 
@@ -240,8 +376,6 @@ signal sd_rd               : vd_std_array(G_VDNUM - 1 downto 0);
 signal sd_wr               : vd_std_array(G_VDNUM - 1 downto 0);
 signal sd_blk_cnt          : vd_vec_array(G_VDNUM - 1 downto 0)(5 downto 0);
 
-signal atr_data_bytes      : unsigned(27 downto 0) := (others => '0');
-
 signal pokeymax_config     : std_logic_vector(38 downto 0);
 
   
@@ -253,46 +387,44 @@ type t_atr_test_state is (
     ATR_CHECK_HEADER,
     ATR_CALC_GEOMETRY,
     ATR_CALC_GEOMETRY_2,
+
+    ATR_SECTOR_CALC,
+    ATR_SECTOR_PREP,
+    
+    ATR_SECTOR_READ1_START,
+    ATR_SECTOR_READ1_WAIT_ACK_HIGH,
+    ATR_SECTOR_READ1_WAIT_ACK_LOW,
+    ATR_SECTOR_COPY1,
+    
+    ATR_SECTOR_READ2_START,
+    ATR_SECTOR_READ2_WAIT_ACK_HIGH,
+    ATR_SECTOR_READ2_WAIT_ACK_LOW,
+    ATR_SECTOR_COPY2,
+    
+    ATR_SECTOR_CHECK,
+    ATR_SERVICE_COMPLETE,
+
     ATR_DONE
 );
 
-type t_sio_rx_test_state is (
-    SIO_RXSTAT_READ,
-    SIO_RXSTAT_WAIT,
-    SIO_RXSTAT_CAPTURE,
-    SIO_RX_FETCH,
-    SIO_RX_FETCH_WAIT,
-    SIO_RX_CAPTURE,
-
-    SIO_CMDREL_STAT_READ,
-    SIO_CMDREL_STAT_WAIT,
-    SIO_CMDREL_STAT_CAPTURE,
-    SIO_CMDREL_FETCH,
-    SIO_CMDREL_FETCH_WAIT,
-    SIO_CMDREL_CAPTURE,
-
-    SIO_ACK_DELAY,
-    SIO_TXSTAT_READ,
-    SIO_TXSTAT_WAIT,
-    SIO_TXSTAT_CAPTURE,
-    SIO_SEND_ACK,
-    
-    SIO_COMPLETE_DELAY,
-    SIO_COMPLETE_TXSTAT_READ,
-    SIO_COMPLETE_TXSTAT_WAIT,
-    SIO_COMPLETE_TXSTAT_CAPTURE,
-    SIO_SEND_COMPLETE,
-    
-    SIO_STATUS_DELAY,
-    SIO_STATUS_TXSTAT_READ,
-    SIO_STATUS_TXSTAT_WAIT,
-    SIO_STATUS_TXSTAT_CAPTURE,
-    SIO_SEND_STATUS_BYTE
-);
-
-signal sio_rx_test_state    : t_sio_rx_test_state := SIO_RXSTAT_READ;
-
 type t_atr_test_buffer is array (0 to 511) of std_logic_vector(7 downto 0);
+type t_atr_sector_buffer is array (0 to 511) of std_logic_vector(7 downto 0);
+signal atr_sector_buffer    : t_atr_sector_buffer;
+signal atr_sector4_ok       : std_logic := '0';
+
+signal atr_sector_number    : unsigned(23 downto 0) := to_unsigned(4, 24);
+signal atr_sector_length    : unsigned(9 downto 0)  := (others => '0');
+
+signal atr_byte_offset      : unsigned(31 downto 0) := (others => '0');
+signal atr_current_lba      : unsigned(31 downto 0) := (others => '0');
+signal atr_lba_offset       : unsigned(8 downto 0)  := (others => '0');
+
+signal atr_first_chunk      : unsigned(9 downto 0)  := (others => '0');
+signal atr_remaining        : unsigned(9 downto 0)  := (others => '0');
+signal atr_copy_index       : unsigned(9 downto 0)  := (others => '0');
+
+signal atr_sector_ready     : std_logic := '0';
+
 signal atr_test_state       : t_atr_test_state := ATR_IDLE;
 signal atr_test_buffer      : t_atr_test_buffer;
 signal atr_header_ok        : std_logic := '0';
@@ -307,6 +439,27 @@ signal atr_valid            : std_logic := '0';
 signal atr_sector_size      : unsigned(15 downto 0) := (others => '0');
 signal atr_paragraphs       : unsigned(23 downto 0) := (others => '0');
 signal atr_sector_count     : unsigned(23 downto 0) := (others => '0');
+   
+type t_atr_boot_state is (
+    ATR_BOOT_IDLE,
+    ATR_BOOT_WRITE_START,
+    ATR_BOOT_WRITE_WAIT,
+    ATR_BOOT_RESET_ASSERT,
+    ATR_BOOT_RESET_RELEASE,
+    ATR_BOOT_OPTION_ASSERT,
+    ATR_BOOT_OPTION_RELEASE
+);
+
+signal atr_boot_state : t_atr_boot_state := ATR_BOOT_IDLE;
+
+signal atari_reset_in       : std_logic;
+
+-- ATR ready event: QNICE -> main clock domain
+signal atr_ready_toggle_qnice : std_logic := '0';
+signal atr_ready_toggle_main  : std_logic := '0';
+signal atr_ready_toggle_d     : std_logic := '0';
+
+signal atr_boot_fill_complete : std_logic := '0';
    
 
 -- kb constants
@@ -355,6 +508,30 @@ begin
     return std_logic_vector(r);
 end function;
 
+function sio_checksum_add(
+   old_sum : std_logic_vector(7 downto 0);
+   new_byte : std_logic_vector(7 downto 0)
+) return std_logic_vector is
+
+   variable tmp : unsigned(8 downto 0);
+   variable res : unsigned(7 downto 0);
+
+begin
+
+   tmp :=
+      ('0' & unsigned(old_sum)) +
+      ('0' & unsigned(new_byte));
+
+   res := tmp(7 downto 0);
+
+   if tmp(8) = '1' then
+      res := res + 1;
+   end if;
+
+   return std_logic_vector(res);
+
+end function;
+
 function sio_make_status0(
     readonly     : std_logic;
     sector_count : unsigned(23 downto 0);
@@ -372,14 +549,12 @@ begin
         r := r or x"08";
     end if;
 
-    -- bit 7 = medium/non-standard density
-    if sector_count /= to_unsigned(720, sector_count'length) then
+    if sector_count = 1040 and sector_size = 128 then
         r := r or x"80";
     end if;
 
-    -- bit 5 = sectors larger than 128 bytes
-    if sector_size /= to_unsigned(128, sector_size'length) then
-        r := r or x"20";
+    if sector_size = 256 then
+        r := r or x"A0";
     end if;
 
     return std_logic_vector(r);
@@ -436,7 +611,7 @@ begin
     video_vblank_o   <= atari_vblank;
     
     atr_header_ok_o  <= atr_valid;
-    atr_sector4_ok_o <= atr_valid and sio_status_response_sent;
+    atr_sector4_ok_o <= sio_read_seen;
     
     atr_geometry_o <=
    "01" when atr_sector_size = to_unsigned(128, 16) else
@@ -481,6 +656,41 @@ begin
       end if;
    end process hard_reset_proc;
    
+   atari_dma_addr_mux <=
+    std_logic_vector(resize(atr_boot_dma_addr, 26))
+    when atr_boot_dma_active = '1'
+    else dma_addr_i;
+
+   atari_dma_req_mux <=
+        atr_boot_dma_req
+        when atr_boot_dma_active = '1'
+        else dma_req_i;
+    
+   -- cold boot is always writing RAM
+   atari_dma_read_mux <=
+        '0'
+        when atr_boot_dma_active = '1'
+        else dma_read_enable_i;
+    
+   -- MiSTer pattern:
+   -- $0000 = FF
+   -- $0001 = 00
+   -- $0002 = FF
+   -- $0003 = 00 ...
+   atari_dma_data_mux <=
+        x"FF" when atr_boot_dma_active = '1' and atr_boot_dma_addr(0) = '0' else
+        x"00" when atr_boot_dma_active = '1' else
+        dma_data_i;
+   
+   atari_reset_in <=
+    (not keyboard_n(m65_f7)) or
+    xex_reset_i or
+    atr_boot_reset;
+    
+    atari_option_force_in <=
+    (not keyboard_n(m65_f1)) or
+    atr_boot_option_force;
+   
    i_atari800top : entity work.atari800top
    port map (
       CLK                    => clk_main_i,
@@ -503,11 +713,11 @@ begin
 
       OSD_PAUSE               => pause_i,
 
-      SET_RESET_IN            => (not keyboard_n(m65_f7)) or xex_reset_i,
+      SET_RESET_IN            => atari_reset_in, 
       SET_PAUSE_IN            => not keyboard_n(m65_restore),
       SET_FREEZER_IN          => '0', -- to do
       SET_RESET_RNMI_IN       => '0',
-      SET_OPTION_FORCE_IN     => not keyboard_n(m65_f1),
+      SET_OPTION_FORCE_IN     => atari_option_force_in,
       SET_SELECT_FORCE_IN     => not keyboard_n(m65_f3),
       SET_START_FORCE_IN      => not keyboard_n(m65_f5),
       SET_HELP_FORCE_IN       => not keyboard_n(m65_f9),
@@ -536,10 +746,10 @@ begin
       TAPE_RESET              => '0',
       TAPE_ACTIVE             => tape_active,
 
-      HPS_DMA_ADDR            => dma_addr_i,
-      HPS_DMA_REQ             => dma_req_i,
-      HPS_DMA_READ_ENABLE     => dma_read_enable_i,
-      HPS_DMA_DATA_OUT        => dma_data_i,
+      HPS_DMA_ADDR            => atari_dma_addr_mux,
+      HPS_DMA_REQ             => atari_dma_req_mux,
+      HPS_DMA_READ_ENABLE     => atari_dma_read_mux,
+      HPS_DMA_DATA_OUT        => atari_dma_data_mux,
       HPS_DMA_DATA_IN         => dma_data_in,
       HPS_DMA_READY           => dma_ready,
 
@@ -622,459 +832,791 @@ begin
       JOY4                    => (others => '0')
    );
    
-   sio_rx_test : process(clk_main_i)
+    atr_boot_proc : process(clk_main_i)
     begin
         if rising_edge(clk_main_i) then
-    
+
             -- defaults
-            sio_uart_enable     <= '0';
-            sio_uart_wr         <= '0';
-            sio_uart_data_write <= (others => '0');
-    
+                atr_boot_dma_req      <= '0';
+                atr_boot_reset        <= '0';
+                atr_boot_option_force <= '0';
+
             if reset_core_n = '0' then
 
-                sio_rx_test_state <= SIO_RXSTAT_READ;
-                sio_status_seen   <= '0';
-                sio_uart_addr     <= (others => '0');
+                atr_boot_state       <= ATR_BOOT_IDLE;
+                atr_boot_dma_active  <= '0';
+                atr_boot_dma_addr    <= (others => '0');
+                atr_boot_reset_count <= 0;
+                atr_boot_fill_complete <= '0';
             
-                sio_cmd_pos_ok    <= '0';
-                sio_expected_pos  <= 1;
-            
-                sio_ack_sent             <= '0';
-                sio_complete_sent        <= '0';
-                sio_status_response_sent <= '0';
-                
-                sio_ack_delay_count      <= 0;
-                sio_status_tx_index      <= 0;
-            
+                atr_ready_toggle_d <= atr_ready_toggle_main;
+
             else
-    
-                case sio_rx_test_state is    
-                    --------------------------------------------------------
-                    -- Read RX FIFO status
-                    --
-                    -- addr 3:
-                    -- bit 9 = full
-                    -- bit 8 = empty
-                    --------------------------------------------------------
-                    when SIO_RXSTAT_READ =>
-                        sio_uart_addr   <= "00011";
-                        sio_uart_enable <= '1';
-    
-                        sio_rx_test_state <= SIO_RXSTAT_WAIT;
 
-                    --------------------------------------------------------
-                    -- sio_handler returns read data on the following cycle
-                    --------------------------------------------------------
-                    when SIO_RXSTAT_WAIT =>  
-                        sio_rx_test_state <= SIO_RXSTAT_CAPTURE;
-    
-    
-                    --------------------------------------------------------
-                    -- Something available?
-                    --------------------------------------------------------
-                    when SIO_RXSTAT_CAPTURE =>    
-                        if uart_data_read(8) = '0' then
-                            sio_rx_test_state <= SIO_RX_FETCH;
-                        else
-                            sio_rx_test_state <= SIO_RXSTAT_READ;
-                        end if;
-    
-    
-                    --------------------------------------------------------
-                    -- Fetch next RX FIFO entry
-                    --------------------------------------------------------
-                    when SIO_RX_FETCH =>   
-                        sio_uart_addr   <= "00010";
-                        sio_uart_enable <= '1';
-    
-                        sio_rx_test_state <= SIO_RX_FETCH_WAIT;
-    
-    
-                    --------------------------------------------------------
-                    -- Allow sio_handler registered DATA_OUT to update
-                    --------------------------------------------------------
-                    when SIO_RX_FETCH_WAIT =>    
-                        sio_rx_test_state <= SIO_RX_CAPTURE;
-    
-    
-                    --------------------------------------------------------
-                    -- RX FIFO entry:
-                    --
-                    -- bits 14..8 = command-byte position
-                    -- bits  7..0 = received byte
-                    --
-                    -- Capture complete command and validate its checksum.
-                    --------------------------------------------------------
-                    when SIO_RX_CAPTURE =>
-                        case to_integer(unsigned(uart_data_read(14 downto 8))) is
-        
-                            when 1 =>
-                                sio_cmd_bytes(0) <= uart_data_read(7 downto 0);
-                            
-                                sio_cmd_pos_ok    <= '1';
-                                sio_expected_pos  <= 2;
-                                sio_rx_test_state <= SIO_RXSTAT_READ;
-                            
-                            
-                            when 2 =>
-                                if sio_cmd_pos_ok = '1' and sio_expected_pos = 2 then
-                                    sio_cmd_bytes(1) <= uart_data_read(7 downto 0);
-                                    sio_expected_pos <= 3;
-                                else
-                                    sio_cmd_pos_ok   <= '0';
-                                    sio_expected_pos <= 1;
-                                end if;
-                            
-                                sio_rx_test_state <= SIO_RXSTAT_READ;
-                            
-                            
-                            when 3 =>
-                                if sio_cmd_pos_ok = '1' and sio_expected_pos = 3 then
-                                    sio_cmd_bytes(2) <= uart_data_read(7 downto 0);
-                                    sio_expected_pos <= 4;
-                                else
-                                    sio_cmd_pos_ok   <= '0';
-                                    sio_expected_pos <= 1;
-                                end if;
-                            
-                                sio_rx_test_state <= SIO_RXSTAT_READ;
-                            
-                            
-                            when 4 =>
-                                if sio_cmd_pos_ok = '1' and sio_expected_pos = 4 then
-                                    sio_cmd_bytes(3) <= uart_data_read(7 downto 0);
-                                    sio_expected_pos <= 5;
-                                else
-                                    sio_cmd_pos_ok   <= '0';
-                                    sio_expected_pos <= 1;
-                                end if;
-                            
-                                sio_rx_test_state <= SIO_RXSTAT_READ;
-           
-                            ----------------------------------------------------
-                            -- Byte 5: command checksum
-                            ----------------------------------------------------
-                            when 5 =>
-                            
-                                if sio_cmd_pos_ok = '1' and
-                                   sio_expected_pos = 5 and
-                                   sio_cmd_bytes(0) = x"31" and
-                                   sio_cmd_bytes(1) = x"53" and
-                                   uart_data_read(7 downto 0) =
-                                       sio_checksum4(
-                                           sio_cmd_bytes(0),
-                                           sio_cmd_bytes(1),
-                                           sio_cmd_bytes(2),
-                                           sio_cmd_bytes(3)
-                                       ) then
-                            
-                                    sio_status_seen   <= '1';
-                                    sio_rx_test_state <= SIO_CMDREL_STAT_READ;
-                            
-                                else
-                            
-                                    sio_rx_test_state <= SIO_RXSTAT_READ;
-                            
-                                end if;
-                            
-                                sio_cmd_pos_ok   <= '0';
-                                sio_expected_pos <= 1;
-          
-                            ----------------------------------------------------
-                            -- Command release marker / anything unexpected
-                            ----------------------------------------------------
-                            when others =>
-                                sio_rx_test_state <= SIO_RXSTAT_READ;
-                    
-                            end case;    
-                    --------------------------------------------------------
-                    -- Atari SIO T5:
-                    -- wait at least 100 us before ACK
-                    --------------------------------------------------------
-                    when SIO_ACK_DELAY =>
-                    
-                        if sio_ack_delay_count >=
-                           (clk_main_speed_i / 10000) - 1 then
-                    
-                            sio_ack_delay_count <= 0;
-                            sio_rx_test_state   <= SIO_TXSTAT_READ;
-                    
-                        else
-                    
-                            sio_ack_delay_count <= sio_ack_delay_count + 1;
-                    
-                        end if;
-                    
-                    
-                    --------------------------------------------------------
-                    -- Read TX FIFO status
-                    --
-                    -- addr 1:
-                    -- bit 9 = TX FIFO full
-                    -- bit 8 = TX FIFO empty
-                    --------------------------------------------------------
-                    when SIO_TXSTAT_READ =>
-                    
-                        sio_uart_addr   <= "00001";
-                        sio_uart_enable <= '1';
-                    
-                        sio_rx_test_state <= SIO_TXSTAT_WAIT;
-                    
-                    
-                    --------------------------------------------------------
-                    -- sio_handler DATA_OUT is registered
-                    --------------------------------------------------------
-                    when SIO_TXSTAT_WAIT =>
-                    
-                        sio_rx_test_state <= SIO_TXSTAT_CAPTURE;
-                    
-                    
-                    --------------------------------------------------------
-                    -- Wait until TX FIFO has room
-                    --------------------------------------------------------
-                    when SIO_TXSTAT_CAPTURE =>
-                    
-                        if uart_data_read(9) = '0' then
-                            sio_rx_test_state <= SIO_SEND_ACK;
-                        else
-                            sio_rx_test_state <= SIO_TXSTAT_READ;
-                        end if;
-                    
-                    
-                    --------------------------------------------------------
-                    -- Send ACK = $41 = 'A'
-                    --------------------------------------------------------
-                    when SIO_SEND_ACK =>
-                        sio_uart_addr       <= "00000";
-                        sio_uart_data_write <= x"41";
-                        sio_uart_wr         <= '1';
-                    
-                        sio_ack_sent        <= '1';
-                        sio_ack_delay_count <= 0;
-                        sio_rx_test_state   <= SIO_COMPLETE_DELAY;
-                     
-                   --------------------------------------------------------
-                    -- Wait T5 minimum before COMPLETE.
-                    --
-                    -- MiSTer uses 600 us between ACK and COMPLETE.
-                    --------------------------------------------------------
-                    when SIO_COMPLETE_DELAY =>
-                    
-                        if sio_ack_delay_count >=
-                           ((clk_main_speed_i / 10000) * 6) - 1 then
-                    
-                            sio_ack_delay_count <= 0;
-                            sio_rx_test_state   <= SIO_COMPLETE_TXSTAT_READ;
-                    
-                        else
-                    
-                            sio_ack_delay_count <= sio_ack_delay_count + 1;
-                    
-                        end if;
-                    
-                    
-                    --------------------------------------------------------
-                    -- Read TX FIFO status before COMPLETE
-                    --------------------------------------------------------
-                    when SIO_COMPLETE_TXSTAT_READ =>
-                    
-                        sio_uart_addr   <= "00001";
-                        sio_uart_enable <= '1';
-                    
-                        sio_rx_test_state <= SIO_COMPLETE_TXSTAT_WAIT;
-                    
-                    
-                    --------------------------------------------------------
-                    -- sio_handler DATA_OUT is registered
-                    --------------------------------------------------------
-                    when SIO_COMPLETE_TXSTAT_WAIT =>
-                    
-                        sio_rx_test_state <= SIO_COMPLETE_TXSTAT_CAPTURE;
-                    
-                    
-                    --------------------------------------------------------
-                    -- Wait until TX FIFO has room
-                    --------------------------------------------------------
-                    when SIO_COMPLETE_TXSTAT_CAPTURE =>
-                    
-                        if uart_data_read(9) = '0' then
-                            sio_rx_test_state <= SIO_SEND_COMPLETE;
-                        else
-                            sio_rx_test_state <= SIO_COMPLETE_TXSTAT_READ;
-                        end if;
-                    
-                    
-                    --------------------------------------------------------
-                    -- Send COMPLETE = $43 = 'C'
-                    --------------------------------------------------------
-                    when SIO_SEND_COMPLETE =>
+                case atr_boot_state is
 
-                        sio_uart_addr       <= "00000";
-                        sio_uart_data_write <= x"43";
-                        sio_uart_wr         <= '1';
-                    
-                        sio_complete_sent   <= '1';
-                    
-                        sio_ack_delay_count <= 0;
-                        sio_status_tx_index <= 0;
-                    
-                        sio_rx_test_state <= SIO_STATUS_DELAY;
-                        
-                    --------------------------------------------------------
-                    -- Atari SIO T3:
-                    -- wait 150 us after COMPLETE before response data
-                    --------------------------------------------------------
-                    when SIO_STATUS_DELAY =>
-                    
-                        if sio_ack_delay_count >=
-                           ((clk_main_speed_i / 20000) * 3) - 1 then
-                    
-                            sio_ack_delay_count <= 0;
-                            sio_rx_test_state   <= SIO_STATUS_TXSTAT_READ;
-                    
-                        else
-                    
-                            sio_ack_delay_count <= sio_ack_delay_count + 1;
-                    
+                    ----------------------------------------------------------
+                    -- Wait until ATR parsing/geometry has completed.
+                    ----------------------------------------------------------
+                    when ATR_BOOT_IDLE =>
+
+                        atr_boot_dma_active <= '0';
+
+                        if atr_ready_toggle_main /= atr_ready_toggle_d and
+                           dma_req_i = '0' then
+
+                            atr_ready_toggle_d    <= atr_ready_toggle_main;
+                            atr_boot_dma_addr     <= (others => '0');
+                            atr_boot_dma_active   <= '1';
+
+                            atr_boot_state <= ATR_BOOT_WRITE_START;
+
                         end if;
-                    --------------------------------------------------------
-                    -- Check TX FIFO before every response byte
-                    --------------------------------------------------------
-                    when SIO_STATUS_TXSTAT_READ =>
-                    
-                        sio_uart_addr   <= "00001";
-                        sio_uart_enable <= '1';
-                    
-                        sio_rx_test_state <= SIO_STATUS_TXSTAT_WAIT;
-                    
-                    
-                    when SIO_STATUS_TXSTAT_WAIT =>
-                    
-                        sio_rx_test_state <= SIO_STATUS_TXSTAT_CAPTURE;
-                    
-                    
-                    when SIO_STATUS_TXSTAT_CAPTURE =>
-                    
-                        if uart_data_read(9) = '0' then
-                            sio_rx_test_state <= SIO_SEND_STATUS_BYTE;
-                        else
-                            sio_rx_test_state <= SIO_STATUS_TXSTAT_READ;
-                        end if;
-                        
-                    --------------------------------------------------------
-                    -- STATUS response:
+
+
+                    ----------------------------------------------------------
+                    -- Issue one Atari RAM write.
                     --
-                    --   0 : drive/media flags
-                    --   1 : previous sector status = $FF
-                    --   2 : controller status = $E0
-                    --   3 : $00
-                    --   4 : checksum of bytes 0..3
-                    --------------------------------------------------------
-                    when SIO_SEND_STATUS_BYTE =>
+                    -- Data comes from atari_dma_data_mux:
+                    -- even address = FF
+                    -- odd  address = 00
+                    ----------------------------------------------------------
+                    when ATR_BOOT_WRITE_START =>
+
+                        atr_boot_dma_active <= '1';
+                        atr_boot_dma_req    <= '1';
                     
-                        sio_uart_addr <= "00000";
-                        sio_uart_wr   <= '1';
-                    
-                        case sio_status_tx_index is
-                    
-                            when 0 =>
-                                sio_uart_data_write <= sio_status_byte0;
-                                sio_status_tx_index <= 1;
-                                sio_rx_test_state   <= SIO_STATUS_TXSTAT_READ;
-                    
-                            when 1 =>
-                                sio_uart_data_write <= x"FF";
-                                sio_status_tx_index <= 2;
-                                sio_rx_test_state   <= SIO_STATUS_TXSTAT_READ;
-                    
-                            when 2 =>
-                                sio_uart_data_write <= x"E0";
-                                sio_status_tx_index <= 3;
-                                sio_rx_test_state   <= SIO_STATUS_TXSTAT_READ;
-                    
-                            when 3 =>
-                                sio_uart_data_write <= x"00";
-                                sio_status_tx_index <= 4;
-                                sio_rx_test_state   <= SIO_STATUS_TXSTAT_READ;
-                    
-                            when 4 =>
-                                sio_uart_data_write <=
-                                    sio_checksum4(
-                                        sio_status_byte0,
-                                        x"FF",
-                                        x"E0",
-                                        x"00"
-                                    );
-                    
-                                sio_status_response_sent <= '1';
-                                sio_status_tx_index      <= 0;
-                                sio_rx_test_state        <= SIO_RXSTAT_READ;
-                    
-                        end case;
-                    --------------------------------------------------------
-                    -- Wait for command-release marker
-                    --------------------------------------------------------
-                    when SIO_CMDREL_STAT_READ =>
-                    
-                        sio_uart_addr   <= "00011";
-                        sio_uart_enable <= '1';
-                    
-                        sio_rx_test_state <= SIO_CMDREL_STAT_WAIT;
+                        atr_boot_state <= ATR_BOOT_WRITE_WAIT;
                     
                     
-                    --------------------------------------------------------
-                    -- Allow registered DATA_OUT to update
-                    --------------------------------------------------------
-                    when SIO_CMDREL_STAT_WAIT =>
+                    ----------------------------------------------------------
+                    -- KEEP request asserted until Atari DMA acknowledges it.
+                    ----------------------------------------------------------
+                    when ATR_BOOT_WRITE_WAIT =>
                     
-                        sio_rx_test_state <= SIO_CMDREL_STAT_CAPTURE;
+                        atr_boot_dma_active <= '1';
+                        atr_boot_dma_req    <= '1';
                     
+                        if dma_ready = '1' then
                     
-                    --------------------------------------------------------
-                    -- Wait until release marker is in RX FIFO
-                    --------------------------------------------------------
-                    when SIO_CMDREL_STAT_CAPTURE =>
+                            if atr_boot_dma_addr = x"FFFF" then
+                            
+                                atr_boot_fill_complete <= '1';
                     
-                        if uart_data_read(8) = '0' then
-                            sio_rx_test_state <= SIO_CMDREL_FETCH;
-                        else
-                            sio_rx_test_state <= SIO_CMDREL_STAT_READ;
+                                -- All 64K has now been initialized.
+                                atr_boot_dma_active  <= '0';
+                                atr_boot_reset_count <= 0;
+                    
+                                atr_boot_state <= ATR_BOOT_RESET_ASSERT;
+                    
+                            else
+
+                                atr_boot_dma_addr <= atr_boot_dma_addr + 1;
+                                atr_boot_state <= ATR_BOOT_WRITE_START;
+                            
+                            end if;
+
                         end if;
+
+                    ----------------------------------------------------------
+                    -- Hold ordinary Atari reset for ~1 ms.
+                    ----------------------------------------------------------
+                    when ATR_BOOT_RESET_ASSERT =>
                     
+                        atr_boot_reset <= '1';
                     
-                    --------------------------------------------------------
-                    -- Fetch command-release marker
-                    --------------------------------------------------------
-                    when SIO_CMDREL_FETCH =>
+                        if atr_boot_reset_count >= (clk_main_speed_i / 1000) - 1 then
                     
-                        sio_uart_addr   <= "00010";
-                        sio_uart_enable <= '1';
+                            atr_boot_reset_count <= 0;
+                            atr_boot_state       <= ATR_BOOT_RESET_RELEASE;
                     
-                        sio_rx_test_state <= SIO_CMDREL_FETCH_WAIT;
+                        else
                     
+                            atr_boot_reset_count <= atr_boot_reset_count + 1;
                     
-                    --------------------------------------------------------
-                    -- Allow registered DATA_OUT to update
-                    --------------------------------------------------------
-                    when SIO_CMDREL_FETCH_WAIT =>
+                        end if;
+
+
+                    ----------------------------------------------------------
+                    -- Release reset.
+                    ----------------------------------------------------------
+                    when ATR_BOOT_RESET_RELEASE =>
                     
-                        sio_rx_test_state <= SIO_CMDREL_CAPTURE;
+                        atr_boot_reset <= '0';
                     
+                        atr_boot_state <= ATR_BOOT_OPTION_ASSERT;
+                    ----------------------------------------------------------
+                    -- Match MiSTer's post-cold-reset OPTION force pulse.
+                    ----------------------------------------------------------
+                    when ATR_BOOT_OPTION_ASSERT =>
                     
-                    --------------------------------------------------------
-                    -- Release marker consumed.
-                    -- Start T5 timing now.
-                    --------------------------------------------------------
-                    when SIO_CMDREL_CAPTURE =>
+                        atr_boot_option_force <= '1';
                     
-                        sio_ack_delay_count <= 0;
-                        sio_rx_test_state   <= SIO_ACK_DELAY;                
-                               
-                end case;   
+                        atr_boot_state <= ATR_BOOT_OPTION_RELEASE;
+                        
+                    when ATR_BOOT_OPTION_RELEASE =>
+
+                        atr_boot_option_force <= '0';
+                    
+                        atr_boot_state <= ATR_BOOT_IDLE;   
+
+                  end case;
+
             end if;
+
         end if;
     end process;
+   
+    sio_controller_proc : process(clk_main_i)
+       variable status_tmp : unsigned(7 downto 0);
+       variable sector_tmp : unsigned(23 downto 0);
+    begin
+    
+       if rising_edge(clk_main_i) then
+    
+          ---------------------------------------------------------------
+          -- UART controls are strobes.
+          ---------------------------------------------------------------
+    
+          sio_uart_enable <= '0';
+          sio_uart_wr     <= '0';
+    
+    
+          if reset_core_n = '0' then
+             sio_state            <= SIO_IDLE;
+             sio_tx_return_state  <= SIO_IDLE;
+    
+             sio_uart_addr        <= (others => '0');
+             sio_uart_data_write  <= (others => '0');
+    
+             sio_rx_index         <= 0;
+             sio_cmd_pos_ok       <= '1';
+             sio_collecting       <= '0';
+    
+             sio_rx_divisor       <= (others => '0');
+    
+             sio_command_kind     <= SIO_COMMAND_NONE;
+    
+             sio_delay_count      <= 0;
+             sio_settle_count     <= 0;
+    
+             sio_tx_byte          <= (others => '0');
+    
+             sio_status_index     <= 0;  
+             sio_read_index       <= (others => '0');
+             sio_read_length      <= (others => '0');
+             sio_read_checksum    <= (others => '0');
+             sio_read_failed      <= '0';
+    
+             sio_status_seen      <= '0';
+             sio_read_seen        <= '0';
+    
+             sio_cmd_bytes        <= (others => (others => '0'));
+    
+             sio_atr_req_toggle_main <= (others => '0');
+             sio_atr_req_sector_main <= (others => '0');
+    
+             sio_atr_done_seen    <= '0';
+    
+    
+          else
+             case sio_state is
+    
+                ----------------------------------------------------------
+                -- Poll receive FIFO.
+                ----------------------------------------------------------
+    
+                when SIO_IDLE =>
+                   sio_uart_addr   <= "00011";
+                   sio_uart_enable <= '1';
+    
+                   sio_state <= SIO_RXSTAT_WAIT;
+    
+    
+                when SIO_RXSTAT_WAIT =>
+                   sio_state <= SIO_RXSTAT_CAPTURE;
+    
+    
+                when SIO_RXSTAT_CAPTURE =>  
+                   -- RX empty bit = 0 means at least one entry exists.
+                   if uart_data_read(8) = '0' then
+                      if sio_collecting = '0' then
+    
+                         sio_rx_index   <= 0;
+                         sio_cmd_pos_ok <= '1';
+                         sio_collecting <= '1';
+    
+                      end if;
+    
+                      sio_state <= SIO_RX_READ;
+    
+                   else  
+                      sio_state <= SIO_IDLE;
+    
+                   end if;
+    
+    
+                ----------------------------------------------------------
+                -- Consume one RX FIFO entry.
+                ----------------------------------------------------------
+    
+                when SIO_RX_READ =>  
+                   sio_uart_addr   <= "00010";
+                   sio_uart_enable <= '1';
+    
+                   sio_state <= SIO_RX_WAIT;
+    
+    
+                when SIO_RX_WAIT =>   
+                   sio_state <= SIO_RX_CAPTURE;
+    
+    
+                when SIO_RX_CAPTURE =>    
+                   if sio_rx_index <= 4 then
+    
+                      -- MiSTer expects command numbers 1..5.
+                      if unsigned(uart_data_read(14 downto 8)) /=
+                         to_unsigned(sio_rx_index + 1, 7) then
+    
+                         sio_cmd_pos_ok <= '0';
+    
+                      end if;
+    
+                      sio_cmd_bytes(sio_rx_index) <=
+                         uart_data_read(7 downto 0);
+    
+                   end if;
+    
+    
+                   if sio_rx_index = 4 then
+                      -- We now have the five actual command entries:
+                      --
+                      --   1 device
+                      --   2 command
+                      --   3 AUX1
+                      --   4 AUX2
+                      --   5 checksum
+                      --
+                      -- Do NOT consume the sixth FIFO entry here.
+                      -- That entry is COMMAND-line release and is
+                      -- handled explicitly after validation.
+                      sio_collecting <= '0';
+                      sio_state      <= SIO_VALIDATE;
+
+                   else
+                      sio_rx_index <= sio_rx_index + 1;
+
+                      -- Wait until the next command byte exists.
+                      sio_state <= SIO_IDLE;
+
+                   end if;
+    
+    
+                ----------------------------------------------------------
+                -- Decode one complete SIO command.
+                ----------------------------------------------------------
+    
+                when SIO_VALIDATE =>
+                   sio_command_kind <= SIO_COMMAND_NONE;
+                   sio_read_failed  <= '0';
+                
+                   if sio_cmd_pos_ok = '1' and
+                
+                      sio_checksum4(
+                         sio_cmd_bytes(0),
+                         sio_cmd_bytes(1),
+                         sio_cmd_bytes(2),
+                         sio_cmd_bytes(3)
+                      ) = sio_cmd_bytes(4) then
+                
+                
+                      ----------------------------------------------------
+                      -- We currently emulate D1 only.
+                      ----------------------------------------------------
+                
+                      if sio_cmd_bytes(0) = x"31" then
+                
+                
+                         -------------------------------------------------
+                         -- $53 STATUS
+                         -------------------------------------------------
+                
+                         if sio_cmd_bytes(1) = x"53" then
+                            sio_command_kind <= SIO_COMMAND_STATUS;
+                            sio_state        <= SIO_CMDREL_STAT_READ;
+                
+                
+                         -------------------------------------------------
+                         -- $52 READ
+                         --
+                         -- AUX1 = low sector byte
+                         -- AUX2 = high sector byte
+                         -------------------------------------------------
+                
+                         elsif sio_cmd_bytes(1) = x"52" then
+
+                       ------------------------------------------------
+                       -- TEMP DEBUG:
+                       -- proves the Atari issued a valid D1 $52,
+                       -- regardless of ATR/mount readiness.
+                       ------------------------------------------------
+                       sio_read_seen <= '1';
+                    
+                       if vdrives_mounted(0) = '1' and
+                          atr_valid_main = '1' then
+                    
+                          sector_tmp := (others => '0');
+                    
+                          sector_tmp(7 downto 0) :=
+                             unsigned(sio_cmd_bytes(2));
+                    
+                          sector_tmp(15 downto 8) :=
+                             unsigned(sio_cmd_bytes(3));
+                    
+                          if sector_tmp >= to_unsigned(1, 24) and
+                             sector_tmp <= atr_sector_count_main then
+                    
+                             sio_atr_req_sector_main <=
+                                std_logic_vector(sector_tmp);
+                    
+                             sio_command_kind <= SIO_COMMAND_READ;
+                    
+                          else
+                    
+                             sio_command_kind <= SIO_COMMAND_NAK;
+                    
+                          end if;
+                    
+                       else
+                    
+                          -- We DID receive $52, but the ATR service
+                          -- is not ready for it.
+                          sio_command_kind <= SIO_COMMAND_NAK;
+                    
+                       end if;
+                    
+                        sio_state <= SIO_CMDREL_STAT_READ;         
+                         -------------------------------------------------
+                         -- Other D1 commands are not implemented.
+                         -------------------------------------------------
+                
+                         else
+                            sio_command_kind <= SIO_COMMAND_NAK;
+                            sio_state        <= SIO_CMDREL_STAT_READ;
+                         end if;
+                
+                
+                      else
+                
+                         -------------------------------------------------
+                         -- Not D1: ignore.
+                         -------------------------------------------------               
+                         sio_state <= SIO_IDLE;                
+                      end if;
+                
+                
+                   else               
+                      ----------------------------------------------------
+                      -- Bad command framing/checksum: ignore.
+                      ----------------------------------------------------
+                
+                      sio_state <= SIO_IDLE;                
+                   end if;
+    
+                ----------------------------------------------------------
+                -- Wait for command-release marker
+                ----------------------------------------------------------
+             
+    
+                ----------------------------------------------------------
+                -- Wait for COMMAND-line release entry.
+                --
+                -- sio_handler places one additional RX FIFO entry into
+                -- the FIFO when COMMAND rises. The five command entries
+                -- have already been consumed and validated above.
+                ----------------------------------------------------------
+
+                when SIO_CMDREL_STAT_READ =>
+                   sio_uart_addr   <= "00011";
+                   sio_uart_enable <= '1';
+
+                   sio_state <= SIO_CMDREL_STAT_WAIT;
+
+
+                when SIO_CMDREL_STAT_WAIT =>
+                   -- Allow registered DATA_OUT to update.
+                   sio_state <= SIO_CMDREL_STAT_CAPTURE;
+
+
+                when SIO_CMDREL_STAT_CAPTURE =>
+                   -- RX empty = 0 means the release entry is available.
+                   if uart_data_read(8) = '0' then
+                      sio_state <= SIO_CMDREL_FETCH;
+                   else
+                      sio_state <= SIO_CMDREL_STAT_READ;
+                   end if;
+
+
+                when SIO_CMDREL_FETCH =>
+                   -- Consume the COMMAND-release FIFO entry.
+                   sio_uart_addr   <= "00010";
+                   sio_uart_enable <= '1';
+
+                   sio_state <= SIO_CMDREL_FETCH_WAIT;
+
+
+                when SIO_CMDREL_FETCH_WAIT =>
+                   -- Allow registered DATA_OUT to update.
+                   sio_state <= SIO_CMDREL_CAPTURE;
+
+
+                when SIO_CMDREL_CAPTURE =>
+                   -- Release entry has now been consumed.
+                   -- Continue exactly as before.
+                   sio_state <= SIO_DIV_READ;
+
+
+                ----------------------------------------------------------
+                -- Read measured RX divisor.
+                ----------------------------------------------------------
+
+                when SIO_DIV_READ =>   
+                   sio_uart_addr   <= "00100";
+                   sio_uart_enable <= '1';   
+                   sio_state <= SIO_DIV_WAIT;
+    
+    
+                when SIO_DIV_WAIT =>  
+                   sio_state <= SIO_DIV_CAPTURE;
+    
+    
+                when SIO_DIV_CAPTURE =>   
+                   sio_rx_divisor <= uart_data_read(7 downto 0);   
+                   sio_state <= SIO_DIV_WRITE;
+    
+    
+                ----------------------------------------------------------
+                -- MiSTer uart_switch():
+                --
+                -- TX divisor = measured RX divisor - 1
+                ----------------------------------------------------------
+    
+                when SIO_DIV_WRITE => 
+                   sio_uart_addr <= "00100";
+                   if sio_rx_divisor = x"00" then   
+                      sio_uart_data_write <= x"FF";   
+                   else    
+                      sio_uart_data_write <=
+                         std_logic_vector(
+                            unsigned(sio_rx_divisor) - 1
+                         );
+    
+                   end if;
+    
+                   sio_uart_wr <= '1';   
+                   sio_delay_count <= 0;
+                   sio_state       <= SIO_DELAY_ACK;
+    
+    
+                ----------------------------------------------------------
+                -- 100us before ACK / NAK.
+                ----------------------------------------------------------
+    
+                when SIO_DELAY_ACK =>
+
+                   if sio_delay_count = 5399 then
+                
+                      sio_delay_count <= 0;
+                
+                      if sio_command_kind = SIO_COMMAND_NAK then
+                
+                         sio_tx_byte         <= x"4E"; -- 'N'
+                         sio_tx_return_state <= SIO_IDLE;
+                
+                      else
+                
+                         sio_tx_byte         <= x"41"; -- 'A'
+                         sio_tx_return_state <= SIO_AFTER_ACK;
+                
+                      end if;
+                
+                      sio_state <= SIO_TXSTAT_READ;
+                
+                   else
+                
+                      sio_delay_count <= sio_delay_count + 1;
+                
+                   end if;
+    
+    
+                ----------------------------------------------------------
+                -- ACK has entered the TX FIFO.
+                ----------------------------------------------------------
+    
+                when SIO_AFTER_ACK =>
+                   if sio_command_kind = SIO_COMMAND_STATUS then
+    
+                      sio_delay_count <= 0;
+                      sio_state       <= SIO_DELAY_COMPLETE;
+    
+    
+                   elsif sio_command_kind = SIO_COMMAND_READ then
+					   -- Establish completion baseline before launching this request.
+					   sio_atr_done_seen <= atr_done_toggle_main(0);
+
+					   sio_atr_req_toggle_main(0) <=
+						  not sio_atr_req_toggle_main(0);
+					   sio_state <= SIO_ATR_WAIT;
+                   else
+                      sio_state <= SIO_IDLE;
+                   end if;
+    
+    
+                ----------------------------------------------------------
+                -- Wait for QNICE sector reader completion.
+                ----------------------------------------------------------
+    
+                when SIO_ATR_WAIT =>
+                   if atr_done_toggle_main(0) /=
+                      sio_atr_done_seen then
+    
+                      sio_atr_done_seen <=
+                         atr_done_toggle_main(0);
+    
+                      -- Give result metadata several main clocks to
+                      -- settle after the completion-toggle CDC.
+                      sio_settle_count <= 0;
+                      sio_state        <= SIO_ATR_SETTLE;
+    
+                   end if;
+    
+    
+                when SIO_ATR_SETTLE =>
+                   if sio_settle_count = 7 then
+                      sio_settle_count <= 0;
+                      if atr_result_meta_main(10) = '1' then
+                         sio_read_length <=
+                            unsigned(atr_result_meta_main(9 downto 0));
+                         sio_read_failed <= '0';
+                      else
+                         sio_read_length <= (others => '0');
+                         sio_read_failed <= '1';
+                      end if;
+                      sio_delay_count <= 0;
+                      sio_state       <= SIO_DELAY_COMPLETE;
+                   else
+                      sio_settle_count <= sio_settle_count + 1;
+                   end if;
+    
+    
+                ----------------------------------------------------------
+                -- 600us before COMPLETE / ERROR.
+                ----------------------------------------------------------
+    
+                when SIO_DELAY_COMPLETE =>
+
+                   if sio_delay_count = 32399 then
+                
+                      sio_delay_count <= 0;
+                
+                      if sio_read_failed = '1' then
+                         sio_tx_byte <= x"45"; -- 'E'
+                      else
+                         sio_tx_byte <= x"43"; -- 'C'
+                      end if;
+                
+                      sio_tx_return_state <= SIO_AFTER_COMPLETE;
+                      sio_state           <= SIO_TXSTAT_READ;
+                
+                   else
+                
+                      sio_delay_count <= sio_delay_count + 1;
+                
+                   end if;
+    
+    
+                ----------------------------------------------------------
+                -- COMPLETE has entered TX FIFO.
+                ----------------------------------------------------------
+    
+                when SIO_AFTER_COMPLETE =>
+
+                   if sio_read_failed = '1' then
+                
+                      sio_state <= SIO_IDLE;
+                
+                   else
+                
+                      sio_delay_count <= 0;
+                      sio_state       <= SIO_DELAY_DATA;
+                
+                   end if;
+    
+    
+                ----------------------------------------------------------
+                -- 150us before response payload.
+                ----------------------------------------------------------
+    
+                when SIO_DELAY_DATA =>
+
+                   if sio_delay_count = 8099 then
+                
+                      sio_delay_count <= 0;
+                
+                      if sio_command_kind = SIO_COMMAND_STATUS then
+                
+                         sio_status_index <= 0;
+                         sio_state        <= SIO_STATUS_SEND;
+                
+                      else
+                
+                         sio_read_index    <= (others => '0');
+                         sio_read_checksum <= x"00";
+                         sio_state         <= SIO_READ_SEND;
+                
+                      end if;
+                
+                   else
+                
+                      sio_delay_count <= sio_delay_count + 1;
+                
+                   end if;
+                    
+    
+                ----------------------------------------------------------
+                -- Send four STATUS bytes + checksum.
+                ----------------------------------------------------------
+    
+                when SIO_STATUS_SEND =>
+
+                   case sio_status_index is
+                
+                      when 0 =>
+                         sio_tx_byte <= sio_status_byte0;
+                
+                      when 1 =>
+                          sio_tx_byte <= x"FF";
+                
+                      when 2 =>
+                         sio_tx_byte <= x"E0";
+                
+                      when 3 =>
+                         sio_tx_byte <= x"00";
+                
+                      when others =>
+                         sio_tx_byte <=
+                             sio_checksum4(
+                                 sio_status_byte0,
+                                 x"FF",
+                                 x"E0",
+                                 x"00"
+                             );
+                
+                   end case;
+                
+                   sio_tx_return_state <= SIO_STATUS_SENT;
+                   sio_state           <= SIO_TXSTAT_READ;
+                
+                
+                when SIO_STATUS_SENT =>
+                
+                   if sio_status_index = 4 then
+                
+                      sio_status_index <= 0;
+                      sio_status_seen  <= '1';
+                      sio_state        <= SIO_IDLE;
+                
+                   else
+                
+                      sio_status_index <= sio_status_index + 1;
+                      sio_state        <= SIO_STATUS_SEND;
+                
+                   end if;
+                   
+                ----------------------------------------------------------
+                -- Send logical ATR sector bytes.
+                ----------------------------------------------------------
+                
+                when SIO_READ_SEND =>
+                
+                   if sio_read_index < sio_read_length then
+                
+                      sio_tx_byte <=
+                         atr_sector_buffer(
+                            to_integer(sio_read_index)
+                         );
+                
+                      sio_tx_return_state <= SIO_READ_SENT;
+                      sio_state           <= SIO_TXSTAT_READ;
+                
+                   else
+                
+                      -- All payload bytes queued; append Atari checksum.
+                      sio_tx_byte <= sio_read_checksum;
+                
+                      sio_tx_return_state <=
+                         SIO_READ_CHECKSUM_SENT;
+                
+                      sio_state <= SIO_TXSTAT_READ;
+                
+                   end if;
+
+                when SIO_READ_SENT =>
+                   sio_read_checksum <=
+                      sio_checksum_add(
+                         sio_read_checksum,
+                         sio_tx_byte
+                      );
+    
+                   sio_read_index <= sio_read_index + 1;
+                   sio_state <= SIO_READ_SEND;
+    
+    
+                when SIO_READ_CHECKSUM_SENT =>    
+                   -- This proves a real ATR logical sector has gone:
+                   --
+                   -- vdrive -> ATR reader -> SIO TX FIFO.
+                   sio_read_seen <= '1';
+                   sio_state <= SIO_IDLE;
+    
+    
+                ----------------------------------------------------------
+                -- Common UART TX helper.
+                --
+                -- ADDR1 bit9 = TX FIFO full.
+                --
+                -- This is mandatory for sector transfers; we cannot just
+                -- blast 128/256 bytes into the small sio_handler FIFO.
+                ----------------------------------------------------------
+    
+                when SIO_TXSTAT_READ =>
+                   sio_uart_addr   <= "00001";
+                   sio_uart_enable <= '1';
+                   sio_state <= SIO_TXSTAT_WAIT;
+    
+                when SIO_TXSTAT_WAIT =>
+                   sio_state <= SIO_TXSTAT_CAPTURE;
+    
+                when SIO_TXSTAT_CAPTURE =>
+                   if uart_data_read(9) = '0' then
+                      sio_state <= SIO_TX_WRITE;
+                   else
+                      -- FIFO still full; poll again.
+                      sio_state <= SIO_TXSTAT_READ;
+                   end if;
+        
+                when SIO_TX_WRITE =>
+                   sio_uart_addr       <= "00000";
+                   sio_uart_data_write <= sio_tx_byte;
+                   sio_uart_wr         <= '1';
+                   sio_state <= sio_tx_return_state;
+    
+                when others =>
+                   sio_state <= SIO_IDLE;
+             end case;
+          end if;
+       end if;
+    end process;   
    
    i_vdrives : entity work.vdrives
       generic map (
@@ -1123,6 +1665,97 @@ begin
          qnice_we_i        => atari_qnice_we_i
    ); -- i_vdrives
    
+----------------------------------------------------------------------------
+-- ATR geometry -> main clock
+----------------------------------------------------------------------------
+
+    atr_meta_qnice <=
+       std_logic_vector(atr_sector_count) &
+       std_logic_vector(atr_sector_size) &
+       atr_valid;
+    
+    i_atr_meta_cdc : xpm_cdc_array_single
+    generic map (
+       WIDTH => 41
+    )
+    port map (
+       src_clk  => atari_qnice_clk_i,
+       src_in   => atr_meta_qnice,
+    
+       dest_clk => clk_main_i,
+       dest_out => atr_meta_main
+    );
+    
+    atr_valid_main        <= atr_meta_main(0);
+    atr_sector_size_main  <= unsigned(atr_meta_main(16 downto 1));
+    atr_sector_count_main <= unsigned(atr_meta_main(40 downto 17));
+    
+    
+    ----------------------------------------------------------------------------
+    -- Requested logical sector -> QNICE
+    ----------------------------------------------------------------------------
+    
+    i_atr_req_sector_cdc : xpm_cdc_array_single
+    generic map (
+       WIDTH => 24
+    )
+    port map (
+       src_clk  => clk_main_i,
+       src_in   => sio_atr_req_sector_main,
+    
+       dest_clk => atari_qnice_clk_i,
+       dest_out => sio_atr_req_sector_qnice
+    );
+    
+    
+    i_atr_req_toggle_cdc : xpm_cdc_array_single
+    generic map (
+       WIDTH => 1
+    )
+    port map (
+       src_clk  => clk_main_i,
+       src_in   => sio_atr_req_toggle_main,
+    
+       dest_clk => atari_qnice_clk_i,
+       dest_out => sio_atr_req_toggle_qnice
+    );
+    
+    
+    ----------------------------------------------------------------------------
+    -- Sector result -> main
+    ----------------------------------------------------------------------------
+    
+    atr_result_meta_qnice <=
+       atr_sector_service_ok &
+       std_logic_vector(atr_sector_length);
+    
+    
+    i_atr_result_meta_cdc : xpm_cdc_array_single
+    generic map (
+       WIDTH => 11
+    )
+    port map (
+       src_clk  => atari_qnice_clk_i,
+       src_in   => atr_result_meta_qnice,
+    
+       dest_clk => clk_main_i,
+       dest_out => atr_result_meta_main
+    );
+    
+    
+    i_atr_done_toggle_cdc : xpm_cdc_array_single
+    generic map (
+       WIDTH => 1
+    )
+    port map (
+       src_clk  => atari_qnice_clk_i,
+       src_in   => atr_done_toggle_qnice,
+    
+       dest_clk => clk_main_i,
+       dest_out => atr_done_toggle_main
+    );
+   
+
    vdrive_event_main(0) <= disk_change(0);
    vdrive_event_main(1) <= vdrives_mounted(0);
 
@@ -1135,6 +1768,14 @@ begin
           src_in   => vdrive_event_main,
           dest_clk => atari_qnice_clk_i,
           dest_out => vdrive_event_qnice
+       );
+       
+    i_atr_ready_cdc : xpm_cdc_single
+       port map (
+           src_clk  => atari_qnice_clk_i,
+           src_in   => atr_ready_toggle_qnice,
+           dest_clk => clk_main_i,
+           dest_out => atr_ready_toggle_main
        );
        
    atr_test_buffer_write : process(atari_qnice_clk_i)
@@ -1171,6 +1812,8 @@ begin
                sd_lba(0)     <= (others => '0');
                sd_blk_cnt(0) <= (others => '0');
                atr_header_ok <= '0';
+               atr_sector4_ok  <= '0';
+               atr_sector_ready <= '0';
             
                -- disk_change is a toggle, not a pulse
                if disk_change_pending = '1' then
@@ -1220,11 +1863,8 @@ begin
              -- file byte 1 = $02
              -------------------------------------------------------
              when ATR_CHECK_HEADER =>
-
                if atr_test_buffer(0) = x"96" and
-                  atr_test_buffer(1) = x"02" then
-            
-                  atr_valid <= '1';
+                  atr_test_buffer(1) = x"02" then atr_valid <= '1';
             
                   -- bytes 4/5: sector size, little endian
                 atr_sector_size <=
@@ -1289,23 +1929,349 @@ begin
                else
                   atr_sector_count <= (others => '0');
                end if;
-               atr_test_state <= ATR_DONE;
+               -- Geometry calculations complete.  Delay one QNICE clock
+               -- before announcing ATR ready so geometry is committed.
+               atr_test_state <= ATR_CALC_GEOMETRY_2;
+
              when ATR_CALC_GEOMETRY_2 =>
-                atr_test_state <= ATR_DONE;
-             -------------------------------------------------------
-             -- Stay here until another disk-change event
-             -------------------------------------------------------
+               -- Exactly one ATR-ready event for the cold-boot FSM.
+               if atr_valid = '1' then
+                  atr_ready_toggle_qnice <= not atr_ready_toggle_qnice;
+               end if;
+               atr_test_state <= ATR_DONE;
+            -------------------------------------------------------
+            -- Test logical ATR sector 4.
+            --
+            -- 128-byte ATR:
+            --
+            -- sector 4 starts at file byte 400.
+            --
+            -- LBA 0 supplies bytes 400..511 = 112 bytes.
+            -------------------------------------------------------
+            -------------------------------------------------------
+            -- Calculate ATR file byte offset and logical length.
+            -------------------------------------------------------
+            when ATR_SECTOR_CALC =>
+               atr_sector_ready <= '0';
+               atr_copy_index   <= (others => '0');
+            
+               -- Reject sector zero or anything past the image geometry.
+               if atr_sector_number = 0 or
+                   atr_sector_number > atr_sector_count then
+                
+                   atr_sector_service_ok <= '0';
+                   atr_test_state        <= ATR_SERVICE_COMPLETE;
+            
+               elsif atr_sector_size = to_unsigned(512, 16) then
+            
+                  -------------------------------------------------
+                  -- 512-byte ATR sectors:
+                  --
+                  -- offset = 16 + (sector - 1) * 512
+                  -------------------------------------------------
+                  atr_sector_length <= to_unsigned(512, atr_sector_length'length);
+            
+                  atr_byte_offset <=
+                     to_unsigned(16, atr_byte_offset'length) +
+                     shift_left(
+                        resize(
+                           atr_sector_number - 1,
+                           atr_byte_offset'length
+                        ),
+                        9
+                     );
+            
+                  atr_test_state <= ATR_SECTOR_PREP;
+            
+               elsif atr_sector_number <= 3 then
+            
+                  -------------------------------------------------
+                  -- For ordinary ATRs, sectors 1..3 are always
+                  -- stored as 128 bytes.
+                  --
+                  -- offset = 16 + (sector - 1) * 128
+                  -------------------------------------------------
+                  atr_sector_length <= to_unsigned(128, atr_sector_length'length);
+            
+                  atr_byte_offset <=
+                     to_unsigned(16, atr_byte_offset'length) +
+                     shift_left(
+                        resize(
+                           atr_sector_number - 1,
+                           atr_byte_offset'length
+                        ),
+                        7
+                     );
+            
+                  atr_test_state <= ATR_SECTOR_PREP;
+            
+               elsif atr_sector_size = to_unsigned(256, 16) then
+            
+                  -------------------------------------------------
+                  -- Sectors 4+ in a 256-byte ATR:
+                  --
+                  -- offset = 16 + 384 + (sector - 4) * 256
+                  --        = 400 + (sector - 4) * 256
+                  -------------------------------------------------
+                  atr_sector_length <= to_unsigned(256, atr_sector_length'length);
+            
+                  atr_byte_offset <=
+                     to_unsigned(400, atr_byte_offset'length) +
+                     shift_left(
+                        resize(
+                           atr_sector_number - 4,
+                           atr_byte_offset'length
+                        ),
+                        8
+                     );
+            
+                  atr_test_state <= ATR_SECTOR_PREP;
+            
+               elsif atr_sector_size = to_unsigned(128, 16) then
+            
+                  -------------------------------------------------
+                  -- Sectors 4+ in a 128-byte ATR:
+                  --
+                  -- offset = 400 + (sector - 4) * 128
+                  -------------------------------------------------
+                  atr_sector_length <= to_unsigned(128, atr_sector_length'length);
+            
+                  atr_byte_offset <=
+                     to_unsigned(400, atr_byte_offset'length) +
+                     shift_left(
+                        resize(
+                           atr_sector_number - 4,
+                           atr_byte_offset'length
+                        ),
+                        7
+                     );
+            
+                  atr_test_state <= ATR_SECTOR_PREP;
+            
+               else
+            
+                  atr_sector_service_ok <= '0';
+                  atr_test_state <= ATR_SERVICE_COMPLETE;
+            
+               end if;
+            
+            
+            -------------------------------------------------------
+            -- Convert byte offset into:
+            --
+            --   LBA
+            --   offset within 512-byte block
+            --   first chunk size
+            --   remaining bytes
+            -------------------------------------------------------
+            when ATR_SECTOR_PREP =>
+               atr_current_lba <= shift_right(atr_byte_offset, 9);
+               atr_lba_offset  <= atr_byte_offset(8 downto 0);
+            
+               if atr_sector_length <=
+                  to_unsigned(512, atr_sector_length'length) -
+                  resize(unsigned(atr_byte_offset(8 downto 0)),
+                         atr_sector_length'length) then
+            
+                  atr_first_chunk <= atr_sector_length;
+                  atr_remaining   <= (others => '0');
+            
+               else
+            
+                  atr_first_chunk <=
+                     to_unsigned(512, atr_first_chunk'length) -
+                     resize(unsigned(atr_byte_offset(8 downto 0)),
+                            atr_first_chunk'length);
+            
+                  atr_remaining <=
+                     atr_sector_length -
+                     (
+                        to_unsigned(512, atr_sector_length'length) -
+                        resize(unsigned(atr_byte_offset(8 downto 0)),
+                               atr_sector_length'length)
+                     );
+            
+               end if;
+            
+               atr_copy_index <= (others => '0');
+               atr_test_state <= ATR_SECTOR_READ1_START;
+
+            -------------------------------------------------------
+            -- Read first 512-byte LBA.
+            -------------------------------------------------------
+            when ATR_SECTOR_READ1_START =>
+            
+               sd_lba(0)     <= std_logic_vector(atr_current_lba);
+               sd_blk_cnt(0) <= "000000";
+               sd_rd(0)      <= '1';
+            
+               atr_test_state <= ATR_SECTOR_READ1_WAIT_ACK_HIGH;
+            
+            
+            when ATR_SECTOR_READ1_WAIT_ACK_HIGH =>
+               if sd_ack(0) = '1' then
+                  sd_rd(0) <= '0';
+                  atr_test_state <= ATR_SECTOR_READ1_WAIT_ACK_LOW;
+               end if;
+
+            when ATR_SECTOR_READ1_WAIT_ACK_LOW =>
+               if sd_ack(0) = '0' then
+                  atr_copy_index <= (others => '0');
+                  atr_test_state <= ATR_SECTOR_COPY1;
+               end if;
+
+            -------------------------------------------------------
+            -- Copy first piece, one byte per QNICE clock.
+            -------------------------------------------------------
+            when ATR_SECTOR_COPY1 =>
+               if atr_copy_index < atr_first_chunk then
+            
+                  atr_sector_buffer(to_integer(atr_copy_index)) <=
+                     atr_test_buffer(
+                        to_integer(unsigned(atr_lba_offset)) +
+                        to_integer(atr_copy_index)
+                     );
+            
+                  atr_copy_index <= atr_copy_index + 1;
+               else
+            
+                  atr_copy_index <= (others => '0');
+            
+                  if atr_remaining = 0 then
+                     atr_sector_ready <= '1';
+                     atr_test_state   <= ATR_SECTOR_CHECK;
+                  else
+                     atr_current_lba <= atr_current_lba + 1;
+                     atr_test_state  <= ATR_SECTOR_READ2_START;
+                  end if;
+               end if;
+
+            -------------------------------------------------------
+            -- Read second LBA when the logical sector crosses
+            -- a 512-byte vdrive boundary.
+            -------------------------------------------------------
+            when ATR_SECTOR_READ2_START =>
+               sd_lba(0)     <= std_logic_vector(atr_current_lba);
+               sd_blk_cnt(0) <= "000000";
+               sd_rd(0)      <= '1';
+               atr_test_state <= ATR_SECTOR_READ2_WAIT_ACK_HIGH;
+            
+            
+            when ATR_SECTOR_READ2_WAIT_ACK_HIGH =>
+               if sd_ack(0) = '1' then
+                  sd_rd(0) <= '0';
+                  atr_test_state <= ATR_SECTOR_READ2_WAIT_ACK_LOW;
+               end if;
+            
+            
+            when ATR_SECTOR_READ2_WAIT_ACK_LOW =>
+               if sd_ack(0) = '0' then
+                  atr_copy_index <= (others => '0');
+                  atr_test_state <= ATR_SECTOR_COPY2;
+               end if;
+            
+            
+            -------------------------------------------------------
+            -- Copy remaining bytes from start of second LBA.
+            -------------------------------------------------------
+            when ATR_SECTOR_COPY2 =>
+               if atr_copy_index < atr_remaining then
+            
+                  atr_sector_buffer(
+                     to_integer(atr_first_chunk + atr_copy_index)
+                  ) <= atr_test_buffer(to_integer(atr_copy_index));
+            
+                  atr_copy_index <= atr_copy_index + 1;
+            
+               else
+            
+                  atr_sector_ready <= '1';
+                  atr_test_state   <= ATR_SECTOR_CHECK;
+            
+               end if;
+            
+            
+            -------------------------------------------------------
+            -- Temporary hardware validation only.
+            --
+            -- Reader itself is now generic; this comparator is
+            -- still checking Terminator sector 4.
+            -------------------------------------------------------
+            when ATR_SECTOR_CHECK =>
+               -------------------------------------------------------
+               -- Sector has been completely reconstructed in
+               -- atr_sector_buffer.
+               -------------------------------------------------------
+            
+               if atr_sector_service_active = '1' then
+                  atr_sector_service_ok <= '1';
+                  atr_test_state        <= ATR_SERVICE_COMPLETE;
+               else
+                  atr_test_state <= ATR_DONE;
+               end if;
+            
+            
+            when ATR_SERVICE_COMPLETE =>
+               -------------------------------------------------------
+               -- Result metadata and the sector buffer were made
+               -- stable in the previous QNICE state.
+               --
+               -- Toggle completion only now, one QNICE clock later.
+               -------------------------------------------------------
+            
+               atr_done_toggle_qnice(0) <=
+                  not atr_done_toggle_qnice(0);
+               atr_sector_service_active <= '0';
+               atr_test_state <= ATR_DONE;
+                         -------------------------------------------------------
+                         -- Stay here until another disk-change event
+                         -------------------------------------------------------
              when ATR_DONE =>
                sd_rd(0) <= '0';
-               -- A disk-change event is waiting.
-               -- Return to IDLE, which will consume it.
-               if disk_change_pending = '1' then
-                  atr_test_state <= ATR_IDLE;
-               end if;
-              end case;
-           end if;
-           end process;
-    
+            
+               -------------------------------------------------------
+               -- Disk change always wins.
+               --
+               -- IMPORTANT: still use the safe IDLE path here.
+               -- Do not jump directly back to ATR_READ_START.
+               -------------------------------------------------------
+            
+               if disk_change_pending = '1' then atr_test_state <= ATR_IDLE;
+            
+            
+               -------------------------------------------------------
+               -- New logical-sector request from the SIO controller.
+               -------------------------------------------------------
+            
+               elsif sio_atr_req_toggle_qnice(0) /=
+                     atr_req_seen_qnice then
+            
+                  atr_req_seen_qnice <=
+                     sio_atr_req_toggle_qnice(0);
+            
+                  if atr_valid = '1' then
+            
+                     atr_sector_number <=
+                        unsigned(sio_atr_req_sector_qnice);
+            
+                     atr_sector_ready          <= '0';
+                     atr_sector_service_ok     <= '0';
+                     atr_sector_service_active <= '1';
+            
+                     atr_test_state <= ATR_SECTOR_CALC;
+            
+                  else
+            
+                     atr_sector_service_ok     <= '0';
+                     atr_sector_service_active <= '1';
+            
+                     atr_test_state <= ATR_SERVICE_COMPLETE;
+            
+                  end if;
+                end if;
+            end case;
+         end if;
+      end process atr_vdrive_test;
    
    i_keyboard : entity work.keyboard
    port map (
