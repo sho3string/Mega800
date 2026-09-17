@@ -176,6 +176,7 @@ signal sdram_ready         : std_logic;
 signal dma_data_in         : std_logic_vector(7 downto 0);
 signal dma_ready           : std_logic;
 
+signal atr_manual_cold_boot: std_logic;
 signal atr_boot_dma_active : std_logic := '0';
 signal atr_boot_dma_addr   : unsigned(15 downto 0) := (others => '0');
 signal atr_boot_dma_req    : std_logic := '0';
@@ -306,6 +307,9 @@ begin
    --                 '1';
     prevent_reset <= '0'; -- force the reset for now until vdrives are connected properly
     
+    atr_manual_cold_boot <=
+    (not keyboard_n(m65_f7)) and
+    (not keyboard_n(m65_f1));
     
     -- default MiSTer config
     pokeymax_config(38 downto 36) <= "001"; -- mix_sel2
@@ -572,7 +576,9 @@ begin
 
          dma_req_i   => dma_req_i,
          dma_ready_i => dma_ready,
-
+         
+         manual_cold_boot_i      => atr_manual_cold_boot,
+         
          atr_boot_dma_active_o   => atr_boot_dma_active,
          atr_boot_dma_addr_o     => atr_boot_dma_addr,
          atr_boot_dma_req_o      => atr_boot_dma_req,

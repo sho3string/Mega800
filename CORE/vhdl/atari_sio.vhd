@@ -11,6 +11,8 @@ entity atari_sio is
       -- Existing Atari DMA interface used by the ATR cold-boot sequence.
       dma_req_i   : in  std_logic;
       dma_ready_i : in  std_logic;
+      
+      manual_cold_boot_i : in std_logic;
 
       atr_boot_dma_active_o   : out std_logic;
       atr_boot_dma_addr_o     : out unsigned(15 downto 0);
@@ -70,6 +72,7 @@ architecture rtl of atari_sio is
    signal atr_boot_option_force  : std_logic := '0';
    signal atr_boot_reset_count   : natural range 0 to 65535 := 0;
    signal atr_ready_toggle_d     : std_logic := '0';
+   signal manual_cold_boot_d     : std_logic := '0';
    signal atr_boot_fill_complete : std_logic := '0';
 
    signal atr_ready_toggle_main : std_logic;
@@ -256,13 +259,14 @@ begin
 
             if reset_core_n = '0' then
 
-                atr_boot_state       <= ATR_BOOT_IDLE;
-                atr_boot_dma_active  <= '0';
-                atr_boot_dma_addr    <= (others => '0');
-                atr_boot_reset_count <= 0;
+                atr_boot_state         <= ATR_BOOT_IDLE;
+                atr_boot_dma_active    <= '0';
+                atr_boot_dma_addr      <= (others => '0');
+                atr_boot_reset_count   <= 0;
                 atr_boot_fill_complete <= '0';
             
                 atr_ready_toggle_d <= atr_ready_toggle_main;
+                manual_cold_boot_d <= manual_cold_boot_i;
 
             else
 
@@ -274,16 +278,22 @@ begin
                     when ATR_BOOT_IDLE =>
 
                         atr_boot_dma_active <= '0';
-
-                        if atr_ready_toggle_main /= atr_ready_toggle_d and
-                           dma_req_i = '0' then
-
-                            atr_ready_toggle_d    <= atr_ready_toggle_main;
-                            atr_boot_dma_addr     <= (others => '0');
-                            atr_boot_dma_active   <= '1';
-
+                    
+                        -- Track the manual OPTION + RESET combination.
+                        manual_cold_boot_d <= manual_cold_boot_i;
+                    
+                        -- Start the existing cold-boot sequence only when the user
+                        -- presses OPTION + RESET with a valid ATR mounted.
+                        if manual_cold_boot_i = '1' and
+                           manual_cold_boot_d = '0' and
+                           dma_req_i = '0' and
+                           atr_valid_main_i = '1' then
+                    
+                            atr_boot_dma_addr   <= (others => '0');
+                            atr_boot_dma_active <= '1';
+                    
                             atr_boot_state <= ATR_BOOT_WRITE_START;
-
+                    
                         end if;
 
 
