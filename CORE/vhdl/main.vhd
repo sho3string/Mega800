@@ -45,6 +45,7 @@ library work;
 use work.video_modes_pkg.all;
 use work.globals.all;
 use work.vdrives_pkg.all;
+use work.atari_disk_image_pkg.all;
 
 library xpm;
 use xpm.vcomponents.xpm_cdc_single;
@@ -296,7 +297,6 @@ signal sio_read_failed        : std_logic := '0';
 signal sio_status_seen        : std_logic := '0';
 signal sio_read_seen          : std_logic := '0';
 signal sio_drive_activity     : std_logic := '0';
-signal sio_state_debug        : std_logic_vector(4 downto 0);
 
 ----------------------------------------------------------------------------
 -- Main-clock -> QNICE ATR sector request
@@ -338,9 +338,6 @@ signal atr_valid_main           : std_logic;
 signal atr_sector_size_main     : unsigned(15 downto 0);
 signal atr_sector_count_main    : unsigned(23 downto 0);
 
-signal atr_req_seen_qnice       : std_logic := '0';
-
-signal atr_sector_service_active : std_logic := '0';
 signal atr_sector_service_ok     : std_logic := '0';
 
   
@@ -381,65 +378,17 @@ signal sd_blk_cnt          : vd_vec_array(G_VDNUM - 1 downto 0)(5 downto 0);
 signal pokeymax_config     : std_logic_vector(38 downto 0);
 
   
-type t_atr_test_state is (
-    ATR_IDLE,
-    ATR_READ_START,
-    ATR_WAIT_ACK_HIGH,
-    ATR_WAIT_ACK_LOW,
-    ATR_CHECK_HEADER,
-    ATR_CALC_GEOMETRY,
-    ATR_CALC_GEOMETRY_2,
-
-    ATR_SECTOR_CALC,
-    ATR_SECTOR_PREP,
-    
-    ATR_SECTOR_READ1_START,
-    ATR_SECTOR_READ1_WAIT_ACK_HIGH,
-    ATR_SECTOR_READ1_WAIT_ACK_LOW,
-    ATR_SECTOR_COPY1,
-    
-    ATR_SECTOR_READ2_START,
-    ATR_SECTOR_READ2_WAIT_ACK_HIGH,
-    ATR_SECTOR_READ2_WAIT_ACK_LOW,
-    ATR_SECTOR_COPY2,
-    
-    ATR_SECTOR_CHECK,
-    ATR_SERVICE_COMPLETE,
-
-    ATR_DONE
-);
-
-type t_atr_test_buffer is array (0 to 511) of std_logic_vector(7 downto 0);
-type t_atr_sector_buffer is array (0 to 511) of std_logic_vector(7 downto 0);
+-- ATR disk-image backend interface signals.
+-- The implementation now lives in atari_disk_image.vhd.
 signal atr_sector_buffer    : t_atr_sector_buffer;
-signal atr_sector4_ok       : std_logic := '0';
-
-signal atr_sector_number    : unsigned(23 downto 0) := to_unsigned(4, 24);
-signal atr_sector_length    : unsigned(9 downto 0)  := (others => '0');
-
-signal atr_byte_offset      : unsigned(31 downto 0) := (others => '0');
-signal atr_current_lba      : unsigned(31 downto 0) := (others => '0');
-signal atr_lba_offset       : unsigned(8 downto 0)  := (others => '0');
-
-signal atr_first_chunk      : unsigned(9 downto 0)  := (others => '0');
-signal atr_remaining        : unsigned(9 downto 0)  := (others => '0');
-signal atr_copy_index       : unsigned(9 downto 0)  := (others => '0');
-
-signal atr_sector_ready     : std_logic := '0';
-
-signal atr_test_state       : t_atr_test_state := ATR_IDLE;
-signal atr_test_buffer      : t_atr_test_buffer;
-signal atr_header_ok        : std_logic := '0';
+signal atr_sector_length    : unsigned(9 downto 0) := (others => '0');
 
 -- disk-change/mounted state synchronized back into QNICE domain
 signal vdrive_event_main    : std_logic_vector(1 downto 0);
 signal vdrive_event_qnice   : std_logic_vector(1 downto 0);
-signal disk_change_qnice_d  : std_logic := '0';
-signal disk_change_pending  : std_logic := '0';
 
 signal atr_valid            : std_logic := '0';
 signal atr_sector_size      : unsigned(15 downto 0) := (others => '0');
-signal atr_paragraphs       : unsigned(23 downto 0) := (others => '0');
 signal atr_sector_count     : unsigned(23 downto 0) := (others => '0');
    
 type t_atr_boot_state is (
@@ -1804,499 +1753,45 @@ begin
            dest_out => atr_ready_toggle_main
        );
        
-   atr_test_buffer_write : process(atari_qnice_clk_i)
-    begin
-       if rising_edge(atari_qnice_clk_i) then
-    
-          if sd_buff_wr = '1' then
-             atr_test_buffer(to_integer(unsigned(sd_buff_addr))) <= sd_buff_dout;
-          end if;
-    
-       end if;
-    end process;
-    
-    atr_vdrive_test : process(atari_qnice_clk_i)
-    begin
-       if rising_edge(atari_qnice_clk_i) then
-          -- defaults
-          sd_wr(0)      <= '0';
-          sd_buff_din(0) <= (others => '0');
-          
-          -- Latch a disk-change event until the FSM has consumed it.
-          if vdrive_event_qnice(0) /= disk_change_qnice_d then
-            disk_change_pending <= '1';
-          end if;
-    
-          -- remember the previous mount-toggle state
-          disk_change_qnice_d <= vdrive_event_qnice(0);
-          case atr_test_state is
-             -------------------------------------------------------
-             -- Wait for a new disk image to be mounted
-             -------------------------------------------------------
-             when ATR_IDLE =>
-               sd_rd(0)      <= '0';
-               sd_lba(0)     <= (others => '0');
-               sd_blk_cnt(0) <= (others => '0');
-               atr_header_ok <= '0';
-               atr_sector4_ok  <= '0';
-               atr_sector_ready <= '0';
-            
-               -- disk_change is a toggle, not a pulse
-               if disk_change_pending = '1' then
-                   -- This event has now been consumed.
-                   disk_change_pending <= '0';
-                   -- Ignore unmount events; start a new header read on mount.
-                   if vdrive_event_qnice(1) = '1' then
-                      atr_test_state <= ATR_READ_START;
-                   end if;
-                
-                end if;
-             -------------------------------------------------------
-             -- Request one 512-byte block, LBA 0
-             -------------------------------------------------------
-             when ATR_READ_START =>
-                sd_lba(0)     <= x"00000000";
-                sd_blk_cnt(0) <= "000000";    -- blocks - 1 = 0 => one block
-                sd_rd(0)      <= '1';
-                atr_test_state <= ATR_WAIT_ACK_HIGH;
-    
-    
-             -------------------------------------------------------
-             -- Wait for QNICE to accept the request
-             -------------------------------------------------------
-             when ATR_WAIT_ACK_HIGH =>
-               if sd_ack(0) = '1' then
-                  -- Request has been accepted.
-                  -- Drop RD now so it cannot be interpreted as another request
-                  -- when ACK returns low.
-                  sd_rd(0) <= '0';
-            
-                  atr_test_state <= ATR_WAIT_ACK_LOW;
-               end if;
-   
-             -------------------------------------------------------
-             -- Keep request asserted for whole transfer
-             -------------------------------------------------------
-             when ATR_WAIT_ACK_LOW =>
-               if sd_ack(0) = '0' then
-                  atr_test_state <= ATR_CHECK_HEADER;
-               end if;
- 
-             -------------------------------------------------------
-             -- ATR magic is little-endian $0296:
-             --
-             -- file byte 0 = $96
-             -- file byte 1 = $02
-             -------------------------------------------------------
-             when ATR_CHECK_HEADER =>
-               if atr_test_buffer(0) = x"96" and
-                  atr_test_buffer(1) = x"02" then atr_valid <= '1';
-            
-                  -- bytes 4/5: sector size, little endian
-                atr_sector_size <=
-                   unsigned(atr_test_buffer(5)) & unsigned(atr_test_buffer(4));
-                
-                -- bytes 2/3 plus byte 6: paragraph count, little endian
-                atr_paragraphs <=
-                   unsigned(atr_test_buffer(6)) &
-                   unsigned(atr_test_buffer(3)) &
-                   unsigned(atr_test_buffer(2));
-                else
-                  atr_valid       <= '0';
-                  atr_sector_size <= (others => '0');
-                  atr_paragraphs  <= (others => '0');
-            
-               end if;
-            
-               atr_test_state <= ATR_CALC_GEOMETRY;
-             
-             when ATR_CALC_GEOMETRY =>
+   -----------------------------------------------------------------------------
+   -- Atari disk-image backend
+   --
+   -- ATR parsing, geometry, logical-sector mapping and vdrive block reads live
+   -- here.  SIO and all existing CDC stages remain in main.vhd.
+   -----------------------------------------------------------------------------
 
-               if atr_valid = '1' then
-                  if atr_sector_size = to_unsigned(512, 16) then
-                     -- MiSTer:
-                     -- sector_count = paragraphs / 32
-                     atr_sector_count <=
-                        resize(
-                           shift_right(atr_paragraphs, 5),
-                           atr_sector_count'length
-                        );
-                  elsif atr_sector_size = to_unsigned(256, 16) then
-            
-                     -- First three sectors occupy 384 bytes = 24 paragraphs.
-                     --
-                     -- 3 + ((paragraphs * 16 - 384) / 256)
-                     -- =
-                     -- 3 + ((paragraphs - 24) / 16)
-                     atr_sector_count <=
-                        resize(
-                           shift_right(
-                              atr_paragraphs - to_unsigned(24, atr_paragraphs'length),
-                              4
-                           ) + 3,
-                           atr_sector_count'length
-                        );
-                  elsif atr_sector_size = to_unsigned(128, 16) then
-                     -- 3 + ((paragraphs * 16 - 384) / 128)
-                     -- =
-                     -- 3 + ((paragraphs - 24) / 8)
-                     atr_sector_count <=
-                        resize(
-                           shift_right(
-                              atr_paragraphs - to_unsigned(24, atr_paragraphs'length),
-                              3
-                           ) + 3,
-                           atr_sector_count'length
-                        );
-                  else
-                     atr_valid        <= '0';
-                     atr_sector_count <= (others => '0');
-                  end if;
-               else
-                  atr_sector_count <= (others => '0');
-               end if;
-               -- Geometry calculations complete.  Delay one QNICE clock
-               -- before announcing ATR ready so geometry is committed.
-               atr_test_state <= ATR_CALC_GEOMETRY_2;
+   i_atari_disk_image : entity work.atari_disk_image
+      generic map (
+         G_VDNUM => G_VDNUM
+      )
+      port map (
+         qnice_clk_i => atari_qnice_clk_i,
 
-             when ATR_CALC_GEOMETRY_2 =>
-               -- Exactly one ATR-ready event for the cold-boot FSM.
-               if atr_valid = '1' then
-                  atr_ready_toggle_qnice <= not atr_ready_toggle_qnice;
-               end if;
-               atr_test_state <= ATR_DONE;
-            -------------------------------------------------------
-            -- Test logical ATR sector 4.
-            --
-            -- 128-byte ATR:
-            --
-            -- sector 4 starts at file byte 400.
-            --
-            -- LBA 0 supplies bytes 400..511 = 112 bytes.
-            -------------------------------------------------------
-            -------------------------------------------------------
-            -- Calculate ATR file byte offset and logical length.
-            -------------------------------------------------------
-            when ATR_SECTOR_CALC =>
-               atr_sector_ready <= '0';
-               atr_copy_index   <= (others => '0');
-            
-               -- Reject sector zero or anything past the image geometry.
-               if atr_sector_number = 0 or
-                   atr_sector_number > atr_sector_count then
-                
-                   atr_sector_service_ok <= '0';
-                   atr_test_state        <= ATR_SERVICE_COMPLETE;
-            
-               elsif atr_sector_size = to_unsigned(512, 16) then
-            
-                  -------------------------------------------------
-                  -- 512-byte ATR sectors:
-                  --
-                  -- offset = 16 + (sector - 1) * 512
-                  -------------------------------------------------
-                  atr_sector_length <= to_unsigned(512, atr_sector_length'length);
-            
-                  atr_byte_offset <=
-                     to_unsigned(16, atr_byte_offset'length) +
-                     shift_left(
-                        resize(
-                           atr_sector_number - 1,
-                           atr_byte_offset'length
-                        ),
-                        9
-                     );
-            
-                  atr_test_state <= ATR_SECTOR_PREP;
-            
-               elsif atr_sector_number <= 3 then
-            
-                  -------------------------------------------------
-                  -- For ordinary ATRs, sectors 1..3 are always
-                  -- stored as 128 bytes.
-                  --
-                  -- offset = 16 + (sector - 1) * 128
-                  -------------------------------------------------
-                  atr_sector_length <= to_unsigned(128, atr_sector_length'length);
-            
-                  atr_byte_offset <=
-                     to_unsigned(16, atr_byte_offset'length) +
-                     shift_left(
-                        resize(
-                           atr_sector_number - 1,
-                           atr_byte_offset'length
-                        ),
-                        7
-                     );
-            
-                  atr_test_state <= ATR_SECTOR_PREP;
-            
-               elsif atr_sector_size = to_unsigned(256, 16) then
-            
-                  -------------------------------------------------
-                  -- Sectors 4+ in a 256-byte ATR:
-                  --
-                  -- offset = 16 + 384 + (sector - 4) * 256
-                  --        = 400 + (sector - 4) * 256
-                  -------------------------------------------------
-                  atr_sector_length <= to_unsigned(256, atr_sector_length'length);
-            
-                  atr_byte_offset <=
-                     to_unsigned(400, atr_byte_offset'length) +
-                     shift_left(
-                        resize(
-                           atr_sector_number - 4,
-                           atr_byte_offset'length
-                        ),
-                        8
-                     );
-            
-                  atr_test_state <= ATR_SECTOR_PREP;
-            
-               elsif atr_sector_size = to_unsigned(128, 16) then
-            
-                  -------------------------------------------------
-                  -- Sectors 4+ in a 128-byte ATR:
-                  --
-                  -- offset = 400 + (sector - 4) * 128
-                  -------------------------------------------------
-                  atr_sector_length <= to_unsigned(128, atr_sector_length'length);
-            
-                  atr_byte_offset <=
-                     to_unsigned(400, atr_byte_offset'length) +
-                     shift_left(
-                        resize(
-                           atr_sector_number - 4,
-                           atr_byte_offset'length
-                        ),
-                        7
-                     );
-            
-                  atr_test_state <= ATR_SECTOR_PREP;
-            
-               else
-            
-                  atr_sector_service_ok <= '0';
-                  atr_test_state <= ATR_SERVICE_COMPLETE;
-            
-               end if;
-            
-            
-            -------------------------------------------------------
-            -- Convert byte offset into:
-            --
-            --   LBA
-            --   offset within 512-byte block
-            --   first chunk size
-            --   remaining bytes
-            -------------------------------------------------------
-            when ATR_SECTOR_PREP =>
-               atr_current_lba <= shift_right(atr_byte_offset, 9);
-               atr_lba_offset  <= atr_byte_offset(8 downto 0);
-            
-               if atr_sector_length <=
-                  to_unsigned(512, atr_sector_length'length) -
-                  resize(unsigned(atr_byte_offset(8 downto 0)),
-                         atr_sector_length'length) then
-            
-                  atr_first_chunk <= atr_sector_length;
-                  atr_remaining   <= (others => '0');
-            
-               else
-            
-                  atr_first_chunk <=
-                     to_unsigned(512, atr_first_chunk'length) -
-                     resize(unsigned(atr_byte_offset(8 downto 0)),
-                            atr_first_chunk'length);
-            
-                  atr_remaining <=
-                     atr_sector_length -
-                     (
-                        to_unsigned(512, atr_sector_length'length) -
-                        resize(unsigned(atr_byte_offset(8 downto 0)),
-                               atr_sector_length'length)
-                     );
-            
-               end if;
-            
-               atr_copy_index <= (others => '0');
-               atr_test_state <= ATR_SECTOR_READ1_START;
+         vdrive_event_qnice_i => vdrive_event_qnice,
 
-            -------------------------------------------------------
-            -- Read first 512-byte LBA.
-            -------------------------------------------------------
-            when ATR_SECTOR_READ1_START =>
-            
-               sd_lba(0)     <= std_logic_vector(atr_current_lba);
-               sd_blk_cnt(0) <= "000000";
-               sd_rd(0)      <= '1';
-            
-               atr_test_state <= ATR_SECTOR_READ1_WAIT_ACK_HIGH;
-            
-            
-            when ATR_SECTOR_READ1_WAIT_ACK_HIGH =>
-               if sd_ack(0) = '1' then
-                  sd_rd(0) <= '0';
-                  atr_test_state <= ATR_SECTOR_READ1_WAIT_ACK_LOW;
-               end if;
+         sector_req_qnice_i        => sio_atr_req_sector_qnice,
+         sector_req_toggle_qnice_i => sio_atr_req_toggle_qnice,
 
-            when ATR_SECTOR_READ1_WAIT_ACK_LOW =>
-               if sd_ack(0) = '0' then
-                  atr_copy_index <= (others => '0');
-                  atr_test_state <= ATR_SECTOR_COPY1;
-               end if;
+         sector_done_toggle_qnice_o => atr_done_toggle_qnice,
+         sector_service_ok_qnice_o  => atr_sector_service_ok,
+         sector_length_qnice_o      => atr_sector_length,
+         sector_buffer_qnice_o      => atr_sector_buffer,
 
-            -------------------------------------------------------
-            -- Copy first piece, one byte per QNICE clock.
-            -------------------------------------------------------
-            when ATR_SECTOR_COPY1 =>
-               if atr_copy_index < atr_first_chunk then
-            
-                  atr_sector_buffer(to_integer(atr_copy_index)) <=
-                     atr_test_buffer(
-                        to_integer(unsigned(atr_lba_offset)) +
-                        to_integer(atr_copy_index)
-                     );
-            
-                  atr_copy_index <= atr_copy_index + 1;
-               else
-            
-                  atr_copy_index <= (others => '0');
-            
-                  if atr_remaining = 0 then
-                     atr_sector_ready <= '1';
-                     atr_test_state   <= ATR_SECTOR_CHECK;
-                  else
-                     atr_current_lba <= atr_current_lba + 1;
-                     atr_test_state  <= ATR_SECTOR_READ2_START;
-                  end if;
-               end if;
+         atr_valid_qnice_o          => atr_valid,
+         atr_sector_size_qnice_o    => atr_sector_size,
+         atr_sector_count_qnice_o   => atr_sector_count,
+         atr_ready_toggle_qnice_o   => atr_ready_toggle_qnice,
 
-            -------------------------------------------------------
-            -- Read second LBA when the logical sector crosses
-            -- a 512-byte vdrive boundary.
-            -------------------------------------------------------
-            when ATR_SECTOR_READ2_START =>
-               sd_lba(0)     <= std_logic_vector(atr_current_lba);
-               sd_blk_cnt(0) <= "000000";
-               sd_rd(0)      <= '1';
-               atr_test_state <= ATR_SECTOR_READ2_WAIT_ACK_HIGH;
-            
-            
-            when ATR_SECTOR_READ2_WAIT_ACK_HIGH =>
-               if sd_ack(0) = '1' then
-                  sd_rd(0) <= '0';
-                  atr_test_state <= ATR_SECTOR_READ2_WAIT_ACK_LOW;
-               end if;
-            
-            
-            when ATR_SECTOR_READ2_WAIT_ACK_LOW =>
-               if sd_ack(0) = '0' then
-                  atr_copy_index <= (others => '0');
-                  atr_test_state <= ATR_SECTOR_COPY2;
-               end if;
-            
-            
-            -------------------------------------------------------
-            -- Copy remaining bytes from start of second LBA.
-            -------------------------------------------------------
-            when ATR_SECTOR_COPY2 =>
-               if atr_copy_index < atr_remaining then
-            
-                  atr_sector_buffer(
-                     to_integer(atr_first_chunk + atr_copy_index)
-                  ) <= atr_test_buffer(to_integer(atr_copy_index));
-            
-                  atr_copy_index <= atr_copy_index + 1;
-            
-               else
-            
-                  atr_sector_ready <= '1';
-                  atr_test_state   <= ATR_SECTOR_CHECK;
-            
-               end if;
-            
-            
-            -------------------------------------------------------
-            -- Temporary hardware validation only.
-            --
-            -- Reader itself is now generic; this comparator is
-            -- still checking Terminator sector 4.
-            -------------------------------------------------------
-            when ATR_SECTOR_CHECK =>
-               -------------------------------------------------------
-               -- Sector has been completely reconstructed in
-               -- atr_sector_buffer.
-               -------------------------------------------------------
-            
-               if atr_sector_service_active = '1' then
-                  atr_sector_service_ok <= '1';
-                  atr_test_state        <= ATR_SERVICE_COMPLETE;
-               else
-                  atr_test_state <= ATR_DONE;
-               end if;
-            
-            
-            when ATR_SERVICE_COMPLETE =>
-               -------------------------------------------------------
-               -- Result metadata and the sector buffer were made
-               -- stable in the previous QNICE state.
-               --
-               -- Toggle completion only now, one QNICE clock later.
-               -------------------------------------------------------
-            
-               atr_done_toggle_qnice(0)  <= not atr_done_toggle_qnice(0);
-               atr_sector_service_active <= '0';
-               atr_test_state <= ATR_DONE;
-                         -------------------------------------------------------
-                         -- Stay here until another disk-change event
-                         -------------------------------------------------------
-             when ATR_DONE =>
-               sd_rd(0) <= '0';
-            
-               -------------------------------------------------------
-               -- Disk change always wins.
-               --
-               -- IMPORTANT: still use the safe IDLE path here.
-               -- Do not jump directly back to ATR_READ_START.
-               -------------------------------------------------------
-            
-               if disk_change_pending = '1' then atr_test_state <= ATR_IDLE;
-            
-            
-               -------------------------------------------------------
-               -- New logical-sector request from the SIO controller.
-               -------------------------------------------------------
-            
-               elsif sio_atr_req_toggle_qnice(0) /=
-                     atr_req_seen_qnice then
-            
-                  atr_req_seen_qnice <=
-                     sio_atr_req_toggle_qnice(0);
-            
-                  if atr_valid = '1' then
-            
-                     atr_sector_number <=
-                        unsigned(sio_atr_req_sector_qnice);
-            
-                     atr_sector_ready          <= '0';
-                     atr_sector_service_ok     <= '0';
-                     atr_sector_service_active <= '1';
-            
-                     atr_test_state <= ATR_SECTOR_CALC;
-            
-                  else
-            
-                     atr_sector_service_ok     <= '0';
-                     atr_sector_service_active <= '1';
-            
-                     atr_test_state <= ATR_SERVICE_COMPLETE;
-            
-                  end if;
-                end if;
-            end case;
-         end if;
-      end process atr_vdrive_test;
+         sd_lba_o                   => sd_lba,
+         sd_blk_cnt_o               => sd_blk_cnt,
+         sd_rd_o                    => sd_rd,
+         sd_wr_o                    => sd_wr,
+         sd_ack_i                   => sd_ack,
+         sd_buff_addr_i             => sd_buff_addr,
+         sd_buff_dout_i             => sd_buff_dout,
+         sd_buff_din_o              => sd_buff_din,
+         sd_buff_wr_i               => sd_buff_wr
+      );
    
    i_keyboard : entity work.keyboard
    port map (
