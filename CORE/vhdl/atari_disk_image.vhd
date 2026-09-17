@@ -3,15 +3,9 @@
 --
 -- Extracted from main.vhd.  This module owns ATR image parsing, geometry,
 -- logical-sector translation and vdrive block reads.  The SIO protocol and
--- clock-domain crossing logic intentionally remain in main.vhd for now.
+-- control/metadata CDC remain in main.vhd; sector payload CDC is handled here
+-- by a dual-clock sector RAM.
 ----------------------------------------------------------------------------------
-
-library ieee;
-use ieee.std_logic_1164.all;
-
-package atari_disk_image_pkg is
-   type t_atr_sector_buffer is array (0 to 511) of std_logic_vector(7 downto 0);
-end package atari_disk_image_pkg;
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -19,7 +13,6 @@ use ieee.numeric_std.all;
 
 library work;
 use work.vdrives_pkg.all;
-use work.atari_disk_image_pkg.all;
 
 entity atari_disk_image is
    generic (
@@ -40,7 +33,10 @@ entity atari_disk_image is
       sector_done_toggle_qnice_o : out std_logic_vector(0 downto 0);
       sector_service_ok_qnice_o  : out std_logic;
       sector_length_qnice_o      : out unsigned(9 downto 0);
-      sector_buffer_qnice_o      : out t_atr_sector_buffer;
+      -- Dual-clock logical-sector RAM read port.
+      sector_read_clk_i  : in  std_logic;
+      sector_read_addr_i : in  unsigned(8 downto 0);
+      sector_read_data_o : out std_logic_vector(7 downto 0);
 
       -- Parsed image metadata.  Existing CDC remains in main.vhd.
       atr_valid_qnice_o        : out std_logic;
@@ -63,7 +59,7 @@ end entity atari_disk_image;
 
 architecture rtl of atari_disk_image is
 
-   type t_atr_test_state is (
+   type t_atr_block_state is (
       ATR_IDLE,
       ATR_READ_START,
       ATR_WAIT_ACK_HIGH,
@@ -86,10 +82,16 @@ architecture rtl of atari_disk_image is
       ATR_DONE
    );
 
-   type t_atr_test_buffer is array (0 to 511) of std_logic_vector(7 downto 0);
+   type t_atr_block_buffer is array (0 to 511) of std_logic_vector(7 downto 0);
 
-   signal atr_sector_buffer : t_atr_sector_buffer;
-   signal atr_sector4_ok    : std_logic := '0';
+   type t_atr_sector_ram is array (0 to 511) of std_logic_vector(7 downto 0);
+
+   signal atr_sector_ram       : t_atr_sector_ram;
+   signal atr_sector_read_data : std_logic_vector(7 downto 0);
+   signal atr_sector4_ok       : std_logic := '0';
+
+   attribute ram_style : string;
+   attribute ram_style of atr_sector_ram : signal is "block";
 
    signal atr_sector_number : unsigned(23 downto 0) := to_unsigned(4, 24);
    signal atr_sector_length : unsigned(9 downto 0)  := (others => '0');
@@ -104,8 +106,8 @@ architecture rtl of atari_disk_image is
 
    signal atr_sector_ready : std_logic := '0';
 
-   signal atr_test_state  : t_atr_test_state := ATR_IDLE;
-   signal atr_test_buffer : t_atr_test_buffer;
+   signal atr_block_state  : t_atr_block_state := ATR_IDLE;
+   signal atr_block_buffer : t_atr_block_buffer;
    signal atr_header_ok   : std_logic := '0';
 
    signal disk_change_qnice_d : std_logic := '0';
@@ -157,25 +159,34 @@ begin
    sector_done_toggle_qnice_o <= atr_done_toggle_qnice;
    sector_service_ok_qnice_o  <= atr_sector_service_ok;
    sector_length_qnice_o      <= atr_sector_length;
-   sector_buffer_qnice_o      <= atr_sector_buffer;
+   
+   sector_ram_read : process(sector_read_clk_i)
+   begin
+      if rising_edge(sector_read_clk_i) then
+         atr_sector_read_data <=
+            atr_sector_ram(to_integer(sector_read_addr_i));
+      end if;
+   end process;
+
+   sector_read_data_o <= atr_sector_read_data;
 
    atr_valid_qnice_o        <= atr_valid;
    atr_sector_size_qnice_o  <= atr_sector_size;
    atr_sector_count_qnice_o <= atr_sector_count;
    atr_ready_toggle_qnice_o <= atr_ready_toggle_qnice;
 
-   atr_test_buffer_write : process(qnice_clk_i)
+   atr_block_buffer_write : process(qnice_clk_i)
     begin
        if rising_edge(qnice_clk_i) then
     
           if sd_buff_wr = '1' then
-             atr_test_buffer(to_integer(unsigned(sd_buff_addr))) <= sd_buff_dout;
+             atr_block_buffer(to_integer(unsigned(sd_buff_addr))) <= sd_buff_dout;
           end if;
     
        end if;
     end process;
     
-    atr_vdrive_test : process(qnice_clk_i)
+    atr_vdrive : process(qnice_clk_i)
     begin
        if rising_edge(qnice_clk_i) then
           -- defaults
@@ -189,7 +200,7 @@ begin
     
           -- remember the previous mount-toggle state
           disk_change_qnice_d <= vdrive_event_qnice(0);
-          case atr_test_state is
+          case atr_block_state is
              -------------------------------------------------------
              -- Wait for a new disk image to be mounted
              -------------------------------------------------------
@@ -207,7 +218,7 @@ begin
                    disk_change_pending <= '0';
                    -- Ignore unmount events; start a new header read on mount.
                    if vdrive_event_qnice(1) = '1' then
-                      atr_test_state <= ATR_READ_START;
+                      atr_block_state <= ATR_READ_START;
                    end if;
                 
                 end if;
@@ -218,7 +229,7 @@ begin
                 sd_lba(0)     <= x"00000000";
                 sd_blk_cnt(0) <= "000000";    -- blocks - 1 = 0 => one block
                 sd_rd(0)      <= '1';
-                atr_test_state <= ATR_WAIT_ACK_HIGH;
+                atr_block_state <= ATR_WAIT_ACK_HIGH;
     
     
              -------------------------------------------------------
@@ -231,7 +242,7 @@ begin
                   -- when ACK returns low.
                   sd_rd(0) <= '0';
             
-                  atr_test_state <= ATR_WAIT_ACK_LOW;
+                  atr_block_state <= ATR_WAIT_ACK_LOW;
                end if;
    
              -------------------------------------------------------
@@ -239,7 +250,7 @@ begin
              -------------------------------------------------------
              when ATR_WAIT_ACK_LOW =>
                if sd_ack(0) = '0' then
-                  atr_test_state <= ATR_CHECK_HEADER;
+                  atr_block_state <= ATR_CHECK_HEADER;
                end if;
  
              -------------------------------------------------------
@@ -249,18 +260,18 @@ begin
              -- file byte 1 = $02
              -------------------------------------------------------
              when ATR_CHECK_HEADER =>
-               if atr_test_buffer(0) = x"96" and
-                  atr_test_buffer(1) = x"02" then atr_valid <= '1';
+               if atr_block_buffer(0) = x"96" and
+                  atr_block_buffer(1) = x"02" then atr_valid <= '1';
             
                   -- bytes 4/5: sector size, little endian
                 atr_sector_size <=
-                   unsigned(atr_test_buffer(5)) & unsigned(atr_test_buffer(4));
+                   unsigned(atr_block_buffer(5)) & unsigned(atr_block_buffer(4));
                 
                 -- bytes 2/3 plus byte 6: paragraph count, little endian
                 atr_paragraphs <=
-                   unsigned(atr_test_buffer(6)) &
-                   unsigned(atr_test_buffer(3)) &
-                   unsigned(atr_test_buffer(2));
+                   unsigned(atr_block_buffer(6)) &
+                   unsigned(atr_block_buffer(3)) &
+                   unsigned(atr_block_buffer(2));
                 else
                   atr_valid       <= '0';
                   atr_sector_size <= (others => '0');
@@ -268,7 +279,7 @@ begin
             
                end if;
             
-               atr_test_state <= ATR_CALC_GEOMETRY;
+               atr_block_state <= ATR_CALC_GEOMETRY;
              
              when ATR_CALC_GEOMETRY =>
 
@@ -317,14 +328,14 @@ begin
                end if;
                -- Geometry calculations complete.  Delay one QNICE clock
                -- before announcing ATR ready so geometry is committed.
-               atr_test_state <= ATR_CALC_GEOMETRY_2;
+               atr_block_state <= ATR_CALC_GEOMETRY_2;
 
              when ATR_CALC_GEOMETRY_2 =>
                -- Exactly one ATR-ready event for the cold-boot FSM.
                if atr_valid = '1' then
                   atr_ready_toggle_qnice <= not atr_ready_toggle_qnice;
                end if;
-               atr_test_state <= ATR_DONE;
+               atr_block_state <= ATR_DONE;
             -------------------------------------------------------
             -- Test logical ATR sector 4.
             --
@@ -346,7 +357,7 @@ begin
                    atr_sector_number > atr_sector_count then
                 
                    atr_sector_service_ok <= '0';
-                   atr_test_state        <= ATR_SERVICE_COMPLETE;
+                   atr_block_state        <= ATR_SERVICE_COMPLETE;
             
                elsif atr_sector_size = to_unsigned(512, 16) then
             
@@ -367,7 +378,7 @@ begin
                         9
                      );
             
-                  atr_test_state <= ATR_SECTOR_PREP;
+                  atr_block_state <= ATR_SECTOR_PREP;
             
                elsif atr_sector_number <= 3 then
             
@@ -389,7 +400,7 @@ begin
                         7
                      );
             
-                  atr_test_state <= ATR_SECTOR_PREP;
+                  atr_block_state <= ATR_SECTOR_PREP;
             
                elsif atr_sector_size = to_unsigned(256, 16) then
             
@@ -411,7 +422,7 @@ begin
                         8
                      );
             
-                  atr_test_state <= ATR_SECTOR_PREP;
+                  atr_block_state <= ATR_SECTOR_PREP;
             
                elsif atr_sector_size = to_unsigned(128, 16) then
             
@@ -432,12 +443,12 @@ begin
                         7
                      );
             
-                  atr_test_state <= ATR_SECTOR_PREP;
+                  atr_block_state <= ATR_SECTOR_PREP;
             
                else
             
                   atr_sector_service_ok <= '0';
-                  atr_test_state <= ATR_SERVICE_COMPLETE;
+                  atr_block_state <= ATR_SERVICE_COMPLETE;
             
                end if;
             
@@ -480,7 +491,7 @@ begin
                end if;
             
                atr_copy_index <= (others => '0');
-               atr_test_state <= ATR_SECTOR_READ1_START;
+               atr_block_state <= ATR_SECTOR_READ1_START;
 
             -------------------------------------------------------
             -- Read first 512-byte LBA.
@@ -491,19 +502,19 @@ begin
                sd_blk_cnt(0) <= "000000";
                sd_rd(0)      <= '1';
             
-               atr_test_state <= ATR_SECTOR_READ1_WAIT_ACK_HIGH;
+               atr_block_state <= ATR_SECTOR_READ1_WAIT_ACK_HIGH;
             
             
             when ATR_SECTOR_READ1_WAIT_ACK_HIGH =>
                if sd_ack(0) = '1' then
                   sd_rd(0) <= '0';
-                  atr_test_state <= ATR_SECTOR_READ1_WAIT_ACK_LOW;
+                  atr_block_state <= ATR_SECTOR_READ1_WAIT_ACK_LOW;
                end if;
 
             when ATR_SECTOR_READ1_WAIT_ACK_LOW =>
                if sd_ack(0) = '0' then
                   atr_copy_index <= (others => '0');
-                  atr_test_state <= ATR_SECTOR_COPY1;
+                  atr_block_state <= ATR_SECTOR_COPY1;
                end if;
 
             -------------------------------------------------------
@@ -512,11 +523,11 @@ begin
             when ATR_SECTOR_COPY1 =>
                if atr_copy_index < atr_first_chunk then
             
-                  atr_sector_buffer(to_integer(atr_copy_index)) <=
-                     atr_test_buffer(
-                        to_integer(unsigned(atr_lba_offset)) +
-                        to_integer(atr_copy_index)
-                     );
+                    atr_sector_ram(to_integer(atr_copy_index)) <=
+                       atr_block_buffer(
+                          to_integer(unsigned(atr_lba_offset)) +
+                          to_integer(atr_copy_index)
+                       );
             
                   atr_copy_index <= atr_copy_index + 1;
                else
@@ -525,10 +536,10 @@ begin
             
                   if atr_remaining = 0 then
                      atr_sector_ready <= '1';
-                     atr_test_state   <= ATR_SECTOR_CHECK;
+                     atr_block_state   <= ATR_SECTOR_CHECK;
                   else
                      atr_current_lba <= atr_current_lba + 1;
-                     atr_test_state  <= ATR_SECTOR_READ2_START;
+                     atr_block_state  <= ATR_SECTOR_READ2_START;
                   end if;
                end if;
 
@@ -540,20 +551,20 @@ begin
                sd_lba(0)     <= std_logic_vector(atr_current_lba);
                sd_blk_cnt(0) <= "000000";
                sd_rd(0)      <= '1';
-               atr_test_state <= ATR_SECTOR_READ2_WAIT_ACK_HIGH;
+               atr_block_state <= ATR_SECTOR_READ2_WAIT_ACK_HIGH;
             
             
             when ATR_SECTOR_READ2_WAIT_ACK_HIGH =>
                if sd_ack(0) = '1' then
                   sd_rd(0) <= '0';
-                  atr_test_state <= ATR_SECTOR_READ2_WAIT_ACK_LOW;
+                  atr_block_state <= ATR_SECTOR_READ2_WAIT_ACK_LOW;
                end if;
             
             
             when ATR_SECTOR_READ2_WAIT_ACK_LOW =>
                if sd_ack(0) = '0' then
                   atr_copy_index <= (others => '0');
-                  atr_test_state <= ATR_SECTOR_COPY2;
+                  atr_block_state <= ATR_SECTOR_COPY2;
                end if;
             
             
@@ -563,43 +574,39 @@ begin
             when ATR_SECTOR_COPY2 =>
                if atr_copy_index < atr_remaining then
             
-                  atr_sector_buffer(
-                     to_integer(atr_first_chunk + atr_copy_index)
-                  ) <= atr_test_buffer(to_integer(atr_copy_index));
+                  atr_sector_ram(
+                       to_integer(atr_first_chunk + atr_copy_index)
+                    ) <= atr_block_buffer(to_integer(atr_copy_index));
             
                   atr_copy_index <= atr_copy_index + 1;
             
                else
             
                   atr_sector_ready <= '1';
-                  atr_test_state   <= ATR_SECTOR_CHECK;
+                  atr_block_state   <= ATR_SECTOR_CHECK;
             
                end if;
             
             
-            -------------------------------------------------------
-            -- Temporary hardware validation only.
-            --
-            -- Reader itself is now generic; this comparator is
-            -- still checking Terminator sector 4.
+            -- marks a completed service successful.
             -------------------------------------------------------
             when ATR_SECTOR_CHECK =>
                -------------------------------------------------------
                -- Sector has been completely reconstructed in
-               -- atr_sector_buffer.
+                -- atr_sector_ram.
                -------------------------------------------------------
             
                if atr_sector_service_active = '1' then
                   atr_sector_service_ok <= '1';
-                  atr_test_state        <= ATR_SERVICE_COMPLETE;
+                  atr_block_state        <= ATR_SERVICE_COMPLETE;
                else
-                  atr_test_state <= ATR_DONE;
+                  atr_block_state <= ATR_DONE;
                end if;
             
             
             when ATR_SERVICE_COMPLETE =>
                -------------------------------------------------------
-               -- Result metadata and the sector buffer were made
+               -- Result metadata and the sector ram were made
                -- stable in the previous QNICE state.
                --
                -- Toggle completion only now, one QNICE clock later.
@@ -607,7 +614,7 @@ begin
             
                atr_done_toggle_qnice(0)  <= not atr_done_toggle_qnice(0);
                atr_sector_service_active <= '0';
-               atr_test_state <= ATR_DONE;
+               atr_block_state <= ATR_DONE;
                          -------------------------------------------------------
                          -- Stay here until another disk-change event
                          -------------------------------------------------------
@@ -621,7 +628,7 @@ begin
                -- Do not jump directly back to ATR_READ_START.
                -------------------------------------------------------
             
-               if disk_change_pending = '1' then atr_test_state <= ATR_IDLE;
+               if disk_change_pending = '1' then atr_block_state <= ATR_IDLE;
             
             
                -------------------------------------------------------
@@ -643,19 +650,19 @@ begin
                      atr_sector_service_ok     <= '0';
                      atr_sector_service_active <= '1';
             
-                     atr_test_state <= ATR_SECTOR_CALC;
+                     atr_block_state <= ATR_SECTOR_CALC;
             
                   else
             
                      atr_sector_service_ok     <= '0';
                      atr_sector_service_active <= '1';
             
-                     atr_test_state <= ATR_SERVICE_COMPLETE;
+                     atr_block_state <= ATR_SERVICE_COMPLETE;
             
                   end if;
                 end if;
             end case;
          end if;
-      end process atr_vdrive_test;
+      end process atr_vdrive;
 
 end architecture rtl;

@@ -45,7 +45,6 @@ library work;
 use work.video_modes_pkg.all;
 use work.globals.all;
 use work.vdrives_pkg.all;
-use work.atari_disk_image_pkg.all;
 
 library xpm;
 use xpm.vcomponents.xpm_cdc_single;
@@ -209,7 +208,6 @@ signal sio_uart_enable     : std_logic;
 signal sio_uart_wr         : std_logic;
 signal sio_uart_data_write : std_logic_vector(7 downto 0);
 signal sio_drive_activity  : std_logic;
-signal sio_status_byte0     : std_logic_vector(7 downto 0);
 
 -- Main-clock -> QNICE ATR sector request
 signal sio_atr_req_toggle_main  : std_logic_vector(0 downto 0);
@@ -270,7 +268,8 @@ signal pokeymax_config     : std_logic_vector(38 downto 0);
   
 -- ATR disk-image backend interface signals.
 -- The implementation now lives in atari_disk_image.vhd.
-signal atr_sector_buffer    : t_atr_sector_buffer;
+signal atr_sector_read_addr : unsigned(8 downto 0);
+signal atr_sector_read_data : std_logic_vector(7 downto 0);
 signal atr_sector_length    : unsigned(9 downto 0) := (others => '0');
 
 -- disk-change/mounted state synchronized back into QNICE domain
@@ -296,34 +295,7 @@ constant m65_f7            : integer := 3;  -- RESET
 constant m65_f9            : integer := 68; -- HELP
 constant m65_restore       : integer := 75; -- Pause
 
-function sio_make_status0(
-    readonly     : std_logic;
-    sector_count : unsigned(23 downto 0);
-    sector_size  : unsigned(15 downto 0)
-) return std_logic_vector is
-    variable r : unsigned(7 downto 0);
-begin
 
-    -- MiSTer normal mounted-drive STATUS:
-    -- bit 4 = motor on
-    r := x"10";
-
-    -- bit 3 = write protected
-    if readonly = '1' then
-        r := r or x"08";
-    end if;
-
-    if sector_count = 1040 and sector_size = 128 then
-        r := r or x"80";
-    end if;
-
-    if sector_size = 256 then
-        r := r or x"A0";
-    end if;
-
-    return std_logic_vector(r);
-
-end function;
 
 begin
 
@@ -397,13 +369,6 @@ begin
    atr_sector_count_512_o <=
    '1' when atr_sector_count = to_unsigned(512, atr_sector_count'length)
    else '0';
-   
-   sio_status_byte0 <=
-    sio_make_status0(
-        img_readonly,
-        atr_sector_count,
-        atr_sector_size
-    );
     
     -- Keyboard mapping mode '0' = Atari positional, '1' = MEGA65 semantic.
     mega65_kblayout <= osm_control_i(C_MENU_KBD_MEGA65);
@@ -623,15 +588,18 @@ begin
          sio_uart_data_write_o => sio_uart_data_write,
 
          vdrive_mounted_i        => vdrives_mounted(0),
+         vdrive_readonly_i       => img_readonly,
          atr_valid_main_i        => atr_valid_main,
          atr_sector_count_main_i => atr_sector_count_main,
-         sio_status_byte0_i      => sio_status_byte0,
+         atr_sector_size_main_i  => atr_sector_size_main,
 
          sio_atr_req_toggle_main_o => sio_atr_req_toggle_main,
          sio_atr_req_sector_main_o => sio_atr_req_sector_main,
          atr_done_toggle_main_i    => atr_done_toggle_main,
          atr_result_meta_main_i    => atr_result_meta_main,
-         atr_sector_buffer_i       => atr_sector_buffer,
+
+         atr_sector_read_addr_o    => atr_sector_read_addr,
+         atr_sector_read_data_i    => atr_sector_read_data,
 
          sio_drive_activity_o => sio_drive_activity
       );
@@ -818,7 +786,10 @@ begin
          sector_done_toggle_qnice_o => atr_done_toggle_qnice,
          sector_service_ok_qnice_o  => atr_sector_service_ok,
          sector_length_qnice_o      => atr_sector_length,
-         sector_buffer_qnice_o      => atr_sector_buffer,
+
+         sector_read_clk_i           => clk_main_i,
+         sector_read_addr_i          => atr_sector_read_addr,
+         sector_read_data_o          => atr_sector_read_data,
 
          atr_valid_qnice_o        => atr_valid,
          atr_sector_size_qnice_o  => atr_sector_size,

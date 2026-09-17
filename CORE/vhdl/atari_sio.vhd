@@ -2,9 +2,6 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
-library work;
-use work.atari_disk_image_pkg.all;
-
 entity atari_sio is
    port (
       clk_main_i       : in  std_logic;
@@ -31,11 +28,12 @@ entity atari_sio is
       sio_uart_wr_o         : out std_logic;
       sio_uart_data_write_o : out std_logic_vector(7 downto 0);
 
-      -- Current mounted-drive/status information.
-      vdrive_mounted_i : in std_logic;
-      atr_valid_main_i : in std_logic;
-      atr_sector_count_main_i : in unsigned(23 downto 0);
-      sio_status_byte0_i : in std_logic_vector(7 downto 0);
+       -- Current mounted-drive/status information.
+      vdrive_mounted_i         : in std_logic;
+      vdrive_readonly_i        : in std_logic;
+      atr_valid_main_i         : in std_logic;
+      atr_sector_count_main_i  : in unsigned(23 downto 0);
+      atr_sector_size_main_i   : in unsigned(15 downto 0);
 
       -- Main-domain side of the existing ATR request/completion CDC.
       sio_atr_req_toggle_main_o : out std_logic_vector(0 downto 0);
@@ -43,9 +41,10 @@ entity atari_sio is
       atr_done_toggle_main_i    : in  std_logic_vector(0 downto 0);
       atr_result_meta_main_i    : in  std_logic_vector(10 downto 0);
 
-      -- Sector payload is deliberately left exactly as it is today.
       -- Its CDC will be handled as a separate change after this refactor.
-      atr_sector_buffer_i : in t_atr_sector_buffer;
+      -- Main-clock read port for logical-sector RAM.
+      atr_sector_read_addr_o : out unsigned(8 downto 0);
+      atr_sector_read_data_i : in  std_logic_vector(7 downto 0);
 
       sio_drive_activity_o : out std_logic
    );
@@ -120,6 +119,7 @@ architecture rtl of atari_sio is
       SIO_DELAY_DATA,
       SIO_STATUS_SEND,
       SIO_STATUS_SENT,
+      SIO_READ_FETCH,
       SIO_READ_SEND,
       SIO_READ_SENT,
       SIO_READ_CHECKSUM_SENT,
@@ -154,10 +154,38 @@ architecture rtl of atari_sio is
 
    signal atr_done_toggle_main : std_logic_vector(0 downto 0);
    signal atr_result_meta_main : std_logic_vector(10 downto 0);
-   signal atr_sector_buffer    : t_atr_sector_buffer;
    signal atr_sector_count_main : unsigned(23 downto 0);
    signal atr_valid_main        : std_logic;
    signal vdrives_mounted       : std_logic_vector(0 downto 0);
+   
+   function sio_make_status0(
+      readonly     : std_logic;
+      sector_count : unsigned(23 downto 0);
+      sector_size  : unsigned(15 downto 0)
+   ) return std_logic_vector is
+      variable r : unsigned(7 downto 0);
+   begin
+
+      -- MiSTer normal mounted-drive STATUS:
+      -- bit 4 = motor on
+      r := x"10";
+
+      -- bit 3 = write protected
+      if readonly = '1' then
+         r := r or x"08";
+      end if;
+
+      if sector_count = 1040 and sector_size = 128 then
+         r := r or x"80";
+      end if;
+
+      if sector_size = 256 then
+         r := r or x"A0";
+      end if;
+
+      return std_logic_vector(r);
+
+   end function;
 
    function sio_checksum4(
       b0 : std_logic_vector(7 downto 0);
@@ -197,10 +225,10 @@ begin
    vdrives_mounted(0)    <= vdrive_mounted_i;
    atr_valid_main        <= atr_valid_main_i;
    atr_sector_count_main <= atr_sector_count_main_i;
-   sio_status_byte0      <= sio_status_byte0_i;
+   sio_status_byte0      <= sio_make_status0(vdrive_readonly_i,atr_sector_count_main_i,atr_sector_size_main_i);
    atr_done_toggle_main  <= atr_done_toggle_main_i;
    atr_result_meta_main  <= atr_result_meta_main_i;
-   atr_sector_buffer     <= atr_sector_buffer_i;
+   atr_sector_read_addr_o <= sio_read_index(8 downto 0);
 
    atr_boot_dma_active_o   <= atr_boot_dma_active;
    atr_boot_dma_addr_o     <= atr_boot_dma_addr;
@@ -877,7 +905,7 @@ begin
                 
                          sio_read_index    <= (others => '0');
                          sio_read_checksum <= x"00";
-                         sio_state         <= SIO_READ_SEND;
+                         sio_state         <= SIO_READ_FETCH;
                 
                       end if;
                 
@@ -942,14 +970,18 @@ begin
                 -- Send logical ATR sector bytes.
                 ----------------------------------------------------------
                 
+                when SIO_READ_FETCH =>
+
+                   -- atr_sector_read_addr_o is driven from sio_read_index.
+                   -- Wait one main clock for the synchronous RAM read.
+                   sio_state <= SIO_READ_SEND;
+                
+                
                 when SIO_READ_SEND =>
                 
                    if sio_read_index < sio_read_length then
                 
-                      sio_tx_byte <=
-                         atr_sector_buffer(
-                            to_integer(sio_read_index)
-                         );
+                      sio_tx_byte <= atr_sector_read_data_i;
                 
                       sio_tx_return_state <= SIO_READ_SENT;
                       sio_state           <= SIO_TXSTAT_READ;
@@ -974,7 +1006,7 @@ begin
                       );
     
                    sio_read_index <= sio_read_index + 1;
-                   sio_state <= SIO_READ_SEND;
+                   sio_state <= SIO_READ_FETCH;
     
     
                 when SIO_READ_CHECKSUM_SENT =>    
