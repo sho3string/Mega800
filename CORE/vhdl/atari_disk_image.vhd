@@ -42,7 +42,6 @@ entity atari_disk_image is
       atr_valid_qnice_o        : out std_logic;
       atr_sector_size_qnice_o  : out unsigned(15 downto 0);
       atr_sector_count_qnice_o : out unsigned(23 downto 0);
-      atr_ready_toggle_qnice_o : out std_logic;
 
       -- vdrives QNICE-domain block interface.
       sd_lba_o       : out vd_vec_array(G_VDNUM - 1 downto 0)(31 downto 0);
@@ -122,7 +121,6 @@ architecture rtl of atari_disk_image is
    signal atr_sector_service_active : std_logic := '0';
    signal atr_sector_service_ok     : std_logic := '0';
    signal atr_done_toggle_qnice     : std_logic_vector(0 downto 0) := (others => '0');
-   signal atr_ready_toggle_qnice    : std_logic := '0';
 
    -- Local names preserve the original ATR state-machine body verbatim.
    signal vdrive_event_qnice       : std_logic_vector(1 downto 0);
@@ -173,7 +171,6 @@ begin
    atr_valid_qnice_o        <= atr_valid;
    atr_sector_size_qnice_o  <= atr_sector_size;
    atr_sector_count_qnice_o <= atr_sector_count;
-   atr_ready_toggle_qnice_o <= atr_ready_toggle_qnice;
 
    atr_block_buffer_write : process(qnice_clk_i)
     begin
@@ -331,11 +328,7 @@ begin
                atr_block_state <= ATR_CALC_GEOMETRY_2;
 
              when ATR_CALC_GEOMETRY_2 =>
-               -- Exactly one ATR-ready event for the cold-boot FSM.
-               if atr_valid = '1' then
-                  atr_ready_toggle_qnice <= not atr_ready_toggle_qnice;
-               end if;
-               atr_block_state <= ATR_DONE;
+                atr_block_state <= ATR_DONE;
             -------------------------------------------------------
             -- Test logical ATR sector 4.
             --

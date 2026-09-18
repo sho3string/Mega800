@@ -47,7 +47,6 @@ use work.globals.all;
 use work.vdrives_pkg.all;
 
 library xpm;
-use xpm.vcomponents.xpm_cdc_single;
 use xpm.vcomponents.xpm_cdc_array_single;
 
 entity main is
@@ -282,12 +281,7 @@ signal atr_sector_size      : unsigned(15 downto 0) := (others => '0');
 signal atr_sector_count     : unsigned(23 downto 0) := (others => '0');
    
 signal atari_reset_in : std_logic;
-
--- ATR ready event: QNICE -> main clock domain
-signal atr_ready_toggle_qnice : std_logic := '0';
-signal atr_ready_toggle_main  : std_logic := '0';
    
-
 -- kb constants
 constant m65_f1            : integer := 4;  -- OPTION
 constant m65_f3            : integer := 5;  -- SELECT
@@ -584,14 +578,11 @@ begin
          atr_boot_dma_req_o      => atr_boot_dma_req,
          atr_boot_reset_o        => atr_boot_reset,
          atr_boot_option_force_o => atr_boot_option_force,
-
-         atr_ready_toggle_main_i => atr_ready_toggle_main,
-
-         uart_data_read_i      => uart_data_read,
-         sio_uart_addr_o       => sio_uart_addr,
-         sio_uart_enable_o     => sio_uart_enable,
-         sio_uart_wr_o         => sio_uart_wr,
-         sio_uart_data_write_o => sio_uart_data_write,
+         uart_data_read_i        => uart_data_read,
+         sio_uart_addr_o         => sio_uart_addr,
+         sio_uart_enable_o       => sio_uart_enable,
+         sio_uart_wr_o           => sio_uart_wr,
+         sio_uart_data_write_o   => sio_uart_data_write,
 
          vdrive_mounted_i        => vdrives_mounted(0),
          vdrive_readonly_i       => img_readonly,
@@ -761,15 +752,7 @@ begin
           dest_clk => atari_qnice_clk_i,
           dest_out => vdrive_event_qnice
        );
-       
-    i_atr_ready_cdc : xpm_cdc_single
-       port map (
-           src_clk  => atari_qnice_clk_i,
-           src_in   => atr_ready_toggle_qnice,
-           dest_clk => clk_main_i,
-           dest_out => atr_ready_toggle_main
-       );
-       
+
    -----------------------------------------------------------------------------
    -- Atari disk-image backend
    --
@@ -800,7 +783,6 @@ begin
          atr_valid_qnice_o        => atr_valid,
          atr_sector_size_qnice_o  => atr_sector_size,
          atr_sector_count_qnice_o => atr_sector_count,
-         atr_ready_toggle_qnice_o => atr_ready_toggle_qnice,
 
          sd_lba_o       => sd_lba,
          sd_blk_cnt_o   => sd_blk_cnt,

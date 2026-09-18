@@ -20,9 +20,6 @@ entity atari_sio is
       atr_boot_reset_o        : out std_logic;
       atr_boot_option_force_o : out std_logic;
 
-      -- ATR-ready event already synchronized into the main clock domain.
-      atr_ready_toggle_main_i : in std_logic;
-
       -- sio_handler UART register interface.
       uart_data_read_i      : in  std_logic_vector(15 downto 0);
       sio_uart_addr_o       : out std_logic_vector(4 downto 0);
@@ -43,7 +40,6 @@ entity atari_sio is
       atr_done_toggle_main_i    : in  std_logic_vector(0 downto 0);
       atr_result_meta_main_i    : in  std_logic_vector(10 downto 0);
 
-      -- Its CDC will be handled as a separate change after this refactor.
       -- Main-clock read port for logical-sector RAM.
       atr_sector_read_addr_o : out unsigned(8 downto 0);
       atr_sector_read_data_i : in  std_logic_vector(7 downto 0);
@@ -71,13 +67,9 @@ architecture rtl of atari_sio is
    signal atr_boot_reset         : std_logic := '0';
    signal atr_boot_option_force  : std_logic := '0';
    signal atr_boot_reset_count   : natural range 0 to 65535 := 0;
-   signal atr_ready_toggle_d     : std_logic := '0';
    signal manual_cold_boot_d     : std_logic := '0';
-   signal atr_boot_fill_complete : std_logic := '0';
-
-   signal atr_ready_toggle_main : std_logic;
-   signal dma_ready             : std_logic;
-   signal reset_core_n          : std_logic;
+   signal dma_ready              : std_logic;
+   signal reset_core_n           : std_logic;
 
    signal uart_data_read      : std_logic_vector(15 downto 0);
    signal sio_uart_addr       : std_logic_vector(4 downto 0) := (others => '0');
@@ -223,7 +215,6 @@ architecture rtl of atari_sio is
 begin
    reset_core_n          <= reset_core_n_i;
    dma_ready             <= dma_ready_i;
-   atr_ready_toggle_main <= atr_ready_toggle_main_i;
    uart_data_read        <= uart_data_read_i;
    vdrives_mounted(0)    <= vdrive_mounted_i;
    atr_valid_main        <= atr_valid_main_i;
@@ -252,7 +243,7 @@ begin
     begin
         if rising_edge(clk_main_i) then
 
-            -- defaults
+                -- defaults
                 atr_boot_dma_req      <= '0';
                 atr_boot_reset        <= '0';
                 atr_boot_option_force <= '0';
@@ -263,10 +254,7 @@ begin
                 atr_boot_dma_active    <= '0';
                 atr_boot_dma_addr      <= (others => '0');
                 atr_boot_reset_count   <= 0;
-                atr_boot_fill_complete <= '0';
-            
-                atr_ready_toggle_d <= atr_ready_toggle_main;
-                manual_cold_boot_d <= manual_cold_boot_i;
+                manual_cold_boot_d     <= manual_cold_boot_i;
 
             else
 
@@ -323,9 +311,6 @@ begin
                         if dma_ready = '1' then
                     
                             if atr_boot_dma_addr = x"FFFF" then
-                            
-                                atr_boot_fill_complete <= '1';
-                    
                                 -- All 64K has now been initialized.
                                 atr_boot_dma_active  <= '0';
                                 atr_boot_reset_count <= 0;
