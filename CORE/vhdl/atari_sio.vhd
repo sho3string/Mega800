@@ -1,3 +1,44 @@
+-------------------------------------------------------------------------------------------------------------
+-- Atari SIO Controller
+--
+-- Implements the Atari serial I/O (SIO) protocol used by the MEGA65 Atari 800 core to service ATR disk
+-- images through the MiSTer2MEGA65 virtual-drive infrastructure.
+--
+-- The controller interfaces with sio_handler's UART/FIFO registers and currently emulates disk drive D1:.
+-- It receives and validates Atari SIO command frames, consumes the COMMAND-line release marker generated
+-- by sio_handler, adopts the measured receive baud-rate divisor for transmission, and generates the
+-- appropriate ACK/NAK, COMPLETE/ERROR and response-data sequences.
+--
+-- Currently implemented disk commands:
+--
+--   $53 STATUS
+--      Returns the four-byte Atari disk status block and checksum.
+--
+--   $52 READ
+--      Requests a logical ATR sector from the QNICE-side ATR service, waits for completion through the
+--      request/completion CDC handshake, then transmits the sector data and Atari checksum.
+--
+-- ATR sector data itself is transferred through a dual-clock logical-sector RAM. The QNICE domain fills
+-- the RAM before signalling completion; this controller then reads the completed sector synchronously in
+-- the Atari main-clock domain.
+--
+-- SIO peripheral response timing follows the original MiSTer Atari800 firmware (atari800.cpp):
+--
+--   T2 = 100 us   delay before ACK/NAK
+--   T5 = 600 us   delay before COMPLETE/ERROR
+--   T3 = 150 us   delay between COMPLETE and response data
+--
+-- The delays are converted to clk_main_i cycles using clk_main_speed_i so that protocol timing does not
+-- depend on a particular FPGA main-clock frequency.
+--
+-- This module also implements the ATR cold-boot helper used by the MEGA65 port. When OPTION + RESET is
+-- explicitly requested with a valid ATR mounted, it initializes the Atari's 64K RAM using the existing
+-- DMA interface, performs an Atari reset, and applies the post-reset OPTION pulse required to reproduce
+-- the MiSTer cold-boot behaviour. Merely mounting or changing an ATR does not initiate a cold boot,
+-- allowing disks to be changed while the Atari continues running.
+-------------------------------------------------------------------------------------------------------------
+
+
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -59,6 +100,27 @@ architecture rtl of atari_sio is
       ATR_BOOT_OPTION_ASSERT,
       ATR_BOOT_OPTION_RELEASE
    );
+   
+    -- Atari SIO peripheral response timing.
+    --
+    -- These timings come from the original MiSTer Atari800 firmware
+    -- (atari800.cpp):
+    --
+    --   DELAY_T2_MIN    = 100 us
+    --     BiboDos needs at least 50 us delay before ACK.
+    --
+    --   DELAY_T5_MIN    = 600 us
+    --     DOS 2.0S needs at least 600 us delay to function properly.
+    --
+    --   DELAY_T3_PERIPH = 150 us
+    --     QMEG OS 3 needs a 150 us delay between COMPLETE and data.
+    --
+    -- Convert the firmware's microsecond delays to clk_main_i cycles
+    -- using clk_main_speed_i so the SIO timing is independent of the
+    -- actual main clock frequency.
+   constant SIO_DELAY_T2_US : natural := 100;
+   constant SIO_DELAY_T3_US : natural := 150;
+   constant SIO_DELAY_T5_US : natural := 600;
 
    signal atr_boot_state         : t_atr_boot_state := ATR_BOOT_IDLE;
    signal atr_boot_dma_active    : std_logic := '0';
@@ -261,7 +323,7 @@ begin
                 case atr_boot_state is
 
                     ----------------------------------------------------------
-                    -- Wait until ATR parsing/geometry has completed.
+                    -- Wait for a manual OPTION + RESET cold-boot request.
                     ----------------------------------------------------------
                     when ATR_BOOT_IDLE =>
 
@@ -752,7 +814,8 @@ begin
     
                 when SIO_DELAY_ACK =>
 
-                   if sio_delay_count = 5399 then
+                   if sio_delay_count >=
+                        ((clk_main_speed_i * SIO_DELAY_T2_US) / 1_000_000) - 1 then
                 
                       sio_delay_count <= 0;
                 
@@ -843,7 +906,8 @@ begin
     
                 when SIO_DELAY_COMPLETE =>
 
-                   if sio_delay_count = 32399 then
+                   if sio_delay_count >=
+                        ((clk_main_speed_i * SIO_DELAY_T5_US) / 1_000_000) - 1 then
                 
                       sio_delay_count <= 0;
                 
@@ -887,7 +951,8 @@ begin
     
                 when SIO_DELAY_DATA =>
 
-                   if sio_delay_count = 8099 then
+                   if sio_delay_count >=
+                        ((clk_main_speed_i * SIO_DELAY_T3_US) / 1_000_000) - 1 then
                 
                       sio_delay_count <= 0;
                 
