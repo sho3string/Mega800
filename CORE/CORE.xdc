@@ -11,6 +11,19 @@
 ## Important: Using them in subsequent statements, e.g. clock dividers requires that they
 ## have been named/defined here before
 ## otherwise Vivado does not find the pins)
-create_generated_clock -name main_clk      [get_pins CORE/clk_gen/i_clk_main/CLKOUT0]
+create_generated_clock -name main_clk [get_pins CORE/clk_gen/i_clk_main/CLKOUT0]
 # Add more clocks here, if needed
 
+
+set_false_path -from [get_clocks qnice_clk] -to [get_pins -hierarchical {atr_sector_read_data_reg[*]/D}]
+set_false_path -from [get_clocks qnice_clk] -to [get_pins -hierarchical {atari_dma_addr_main_reg[*]/D}]
+set_false_path -from [get_clocks qnice_clk] -to [get_pins -hierarchical {atari_dma_data_main_reg[*]/D}]
+set_false_path -from [get_clocks qnice_clk] -to [get_pins -hierarchical atari_dma_read_main_reg/D]
+set_false_path -from [get_clocks main_clk] -to [get_pins -hierarchical {dma_readback_reg_reg[*]/D}]
+set_false_path -from [get_clocks qnice_clk] -to [get_pins -hierarchical xex_loader_mode_sync1_reg/D]
+set_false_path -from [get_clocks qnice_clk] -to [get_pins -hierarchical xex_loader_mode_sync1_reg/D]
+set_false_path -from [get_clocks qnice_clk] -to [get_pins -hierarchical atari_dma_req_sync1_reg/D]
+set_false_path -from [get_clocks qnice_clk] -to [get_pins -hierarchical xex_core_reset_sync1_reg/D]
+set_false_path -from [get_clocks qnice_clk] -to [get_pins -hierarchical rom_loaded_sync1_reg/D]
+set_false_path -from [get_clocks qnice_clk] -to [get_pins -hierarchical xex_core_pause_sync1_reg/D]
+set_false_path -from [get_clocks main_clk] -to [get_pins -hierarchical dma_ack_sync1_reg/D]
