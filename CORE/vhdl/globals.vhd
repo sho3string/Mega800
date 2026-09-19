@@ -22,6 +22,7 @@ constant HDMI_VIEW    : hdmi_view_cfg_t         := C_HDMI_VIEW_LEGACY;
 
 -- Menu items
 constant C_MENU_XEX_LOAD        : natural := 3;
+
 constant C_MENU_HDMI_16_9_50    : natural := 7;
 constant C_MENU_HDMI_16_9_60    : natural := 8;
 constant C_MENU_HDMI_4_3_50     : natural := 9;
@@ -32,20 +33,33 @@ constant C_MENU_SVGA_800_60     : natural := 13;
 constant C_MENU_CRT_EMULATION   : natural := 17;
 constant C_MENU_HDMI_ZOOM       : natural := 18;
 constant C_MENU_IMPROVE_AUDIO   : natural := 19;
+
 constant C_MENU_MACHINE_XLXE    : natural := 24;
 constant C_MENU_MACHINE_800     : natural := 25;
-constant C_MENU_OS800_10K       : natural := 27;
-constant C_MENU_OS800_16K       : natural := 28;
-constant C_MENU_OS_LOAD_16K     : natural := 30;
-constant C_MENU_OS_LOAD_10K     : natural := 31;
-constant C_MENU_BASIC_LOAD      : natural := 32;
-constant C_MENU_VGA_STANDARD    : natural := 37;
-constant C_MENU_VGA_15KHZHSVS   : natural := 41;
-constant C_MENU_VGA_15KHZCS     : natural := 42;
-constant C_MENU_KBD_ATARI       : natural := 46;
-constant C_MENU_KBD_MEGA65      : natural := 47;
-constant C_MENU_PAL             : natural := 49;
-constant C_MENU_CLIP_SIDES      : natural := 50;
+
+                                                 ------------------------------------------
+                                                 -- RAM_SELECT    400/800        XL/XE
+constant C_MENU_RAM_8_64        : natural := 27; -- 000           8K             64K
+constant C_MENU_RAM_16_128      : natural := 28; -- 001           16K            128K
+constant C_MENU_RAM_32_320C     : natural := 29; -- 010           32K            320K Compy
+constant C_MENU_RAM_48_320R     : natural := 30; -- 011           48K            320K Rambo
+constant C_MENU_VBXE_DISABLED   : natural := 32;
+constant C_MENU_VBXE_D640       : natural := 33;
+constant C_MENU_VBXE_D740       : natural := 34;
+constant C_MENU_VBXE_NTSC_FIX   : natural := 36;
+constant C_MENU_OS800_10K       : natural := 38;
+constant C_MENU_OS800_16K       : natural := 39;
+constant C_MENU_OS_LOAD_16K     : natural := 41;
+constant C_MENU_OS_LOAD_10K     : natural := 42;
+constant C_MENU_BASIC_LOAD      : natural := 43;
+constant C_MENU_VGA_STANDARD    : natural := 48;
+constant C_MENU_VGA_15KHZHSVS   : natural := 52;
+constant C_MENU_VGA_15KHZCS     : natural := 53;
+constant C_MENU_KBD_ATARI       : natural := 57;
+constant C_MENU_KBD_MEGA65      : natural := 58;
+constant C_MENU_PAL             : natural := 60;
+constant C_MENU_CLIP_SIDES      : natural := 61;
+
 
 ----------------------------------------------------------------------------------------------------------
 -- QNICE Firmware

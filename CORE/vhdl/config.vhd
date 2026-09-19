@@ -76,25 +76,13 @@ type WHS_RECORD_ARRAY_TYPE is array (0 to WHS_RECORDS - 1) of WHS_RECORD_TYPE;
 
 constant SCR_WELCOME : string :=
 
-   "Name of the Demo Core Version 1.0\n" &
-   "MiSTer port done by Demo Author in 2022\n\n" &
-
-   -- We are not insisting. But it would be nice if you gave us credit for MiSTer2MEGA65 by leaving these lines in
-   "Powered by MiSTer2MEGA65 Version [WIP],\n" &
-   "done by sy2002 and MJoergen in 2022\n" &
-
-   "\n\nEdit config.vhd to modify welcome screen.\n\n" &
-   "You can for example show the keyboard map.\n" &
-   "Look at this example for the Demo core:\n\n\n" &
-
-   "    Key                Demo core\n" &
-   "    " & CHR_LINE_10 & CHR_LINE_10 & CHR_LINE_10 & CHR_LINE_1 & CHR_LINE_1 & "\n" &
-   "    Left Cursor        Paddle left\n" &
-   "    Right Cursor       Paddle right\n" &
-   "    Space              Start game\n" &
-   "    Help               Options menu\n\n\n" &
-
-   "\n\n    Press Space to continue.\n\n\n";
+    "\n Mega 800 Core Alpha V1.0\n" &
+   " by Muse\n\n" &
+   " Powered by MiSTer2MEGA65 v2.1.0\n" &
+   " by sy2002 and MJoergen\n\n\n" &
+   " Original MiSTer core contributers\n" &
+   "  woj76,sorgelig,claude & carlosbravoa\n" &
+   "\n\n Press Space to continue.";
 
 constant HELP_1 : string :=
 
@@ -268,7 +256,7 @@ constant SEL_CORENAME      : std_logic_vector(15 downto 0) := x"0200";
 
 -- Currently this is only used in the debug console. Use the welcome screen and the
 -- help system to display the name and version of your core to the end user
-constant CORENAME          : string := "M2M DEMO CORE V1.0";
+constant CORENAME          : string := "Mega800 Alpha V1.0";
 
 --------------------------------------------------------------------------------------------------------------------
 -- "Help" menu / Options menu  (Selectors 0x0300 .. 0x0312): DO NOT TOUCH
@@ -329,7 +317,7 @@ constant OPTM_S_SAVING     : string := "<Saving>";          -- the internal writ
 --             Do use a lower case \n. If you forget one of them or if you use upper case, you will run into undefined behavior.
 --          2. Start each line that contains an actual menu item (multi- or single-select) with a Space character,
 --             otherwise you will experience visual glitches.
-constant OPTM_SIZE         : natural := 53;  -- amount of items including empty lines:
+constant OPTM_SIZE         : natural := 64;  -- amount of items including empty lines:
                                              -- needs to be equal to the number of lines in OPTM_ITEMS and amount of items in OPTM_GROUPS
                                              -- IMPORTANT: If SAVE_SETTINGS is true and OPTM_SIZE changes: Make sure to re-generate and
                                              -- and re-distribute the config file. You can make a new one using M2M/tools/make_config.sh
@@ -337,10 +325,10 @@ constant OPTM_SIZE         : natural := 53;  -- amount of items including empty 
 -- Net size of the Options menu on the screen in characters (excluding the frame, which is hardcoded to two characters)
 -- Without submenus: Use OPTM_SIZE as height, otherwise count how large the actually visible main menu is.
 constant OPTM_DX           : natural := 23;
-constant OPTM_DY           : natural := 23;
+constant OPTM_DY           : natural := 24;
 
 constant OPTM_ITEMS : string :=
-   " Mega800 \n"            &
+   " Mega 800 Alpha V1.0\n" &
    "\n"                     &
 
    " Drive A:%s\n"          &
@@ -365,18 +353,33 @@ constant OPTM_ITEMS : string :=
    " Audio improvements\n"  &
    "\n"                     &
 
-   " System ROM: %s\n"      &
-   " Atari System ROM\n"    &
+   " System Settings: %s\n" &
+   " Atari System Settings\n" &
    "\n"                     &
    " Machine: XL/XE\n"      &
    " Machine: 400/800\n"    &
    "\n"                     &
+
+   " RAM: 8K / 64K\n"         &
+   " RAM: 16K / 128K\n"       &
+   " RAM: 32K / 320K Compy\n" &
+   " RAM: 48K / 320K Rambo\n" &
+   "\n"                       &
+
+   " VBXE: Disabled\n"      &
+   " VBXE: $D640\n"         &
+   " VBXE: $D740\n"         &
+   "\n"                     &
+   " Fix VBXE NTSC bug\n"   &
+   "\n"                     &
+
    " 400/800 OS: 10K\n"     &
    " 400/800 OS: 16K\n"     &
    "\n"                     &
    " Load OS 16K:%s\n"      &
    " Load OS 10K:%s\n"      &
    " Load BASIC:%s\n"       &
+    
    "\n"                     &
    " Back to main menu\n"   &
    "\n"                     &
@@ -421,6 +424,9 @@ constant OPTM_G_LOAD_ATARI_XEX    : integer := 12;
 constant OPTM_G_PAL               : integer := 13;
 constant OPTM_G_CLIP_SIDES        : integer := 14;
 constant OPTM_G_VGA_MODES         : integer := 15;
+constant OPTM_G_RAM               : integer := 16;
+constant OPTM_G_VBXE              : integer := 17;
+constant OPTM_G_VBXE_NTSC_FIX     : integer := 18;
 
 -- !!! DO NOT TOUCH !!!
 type OPTM_GTYPE is array (0 to OPTM_SIZE - 1) of integer range 0 to 2**OPTM_GTC- 1;
@@ -464,9 +470,26 @@ constant OPTM_GROUPS : OPTM_GTYPE := (
                                     
                                        OPTM_G_MACHINE + OPTM_G_STDSEL,                        -- XL/XE
                                        OPTM_G_MACHINE,                                        -- 400/800
-                                    
+
                                        OPTM_G_LINE,
-                                    
+
+                                       OPTM_G_RAM,                                            -- 8K / 64K
+                                       OPTM_G_RAM,                                            -- 16K / 128K
+                                       OPTM_G_RAM,                                            -- 32K / 320K Compy
+                                       OPTM_G_RAM + OPTM_G_STDSEL,                            -- 48K / 320K Rambo
+
+                                       OPTM_G_LINE,
+
+                                       OPTM_G_VBXE + OPTM_G_STDSEL,                           -- VBXE Disabled
+                                       OPTM_G_VBXE,                                           -- VBXE $D640
+                                       OPTM_G_VBXE,                                           -- VBXE $D740
+
+                                       OPTM_G_LINE,
+
+                                       OPTM_G_VBXE_NTSC_FIX + OPTM_G_SINGLESEL,               -- Fix VBXE NTSC bug
+
+                                       OPTM_G_LINE,
+
                                        OPTM_G_OS800_TYPE + OPTM_G_STDSEL,                     -- 10K
                                        OPTM_G_OS800_TYPE,                                     -- 16K
                                     
