@@ -59,7 +59,6 @@ entity atari_sio is
       atr_boot_dma_addr_o     : out unsigned(15 downto 0);
       atr_boot_dma_req_o      : out std_logic;
       atr_boot_reset_o        : out std_logic;
-      atr_boot_option_force_o : out std_logic;
 
       -- sio_handler UART register interface.
       uart_data_read_i      : in  std_logic_vector(15 downto 0);
@@ -96,9 +95,7 @@ architecture rtl of atari_sio is
       ATR_BOOT_WRITE_START,
       ATR_BOOT_WRITE_WAIT,
       ATR_BOOT_RESET_ASSERT,
-      ATR_BOOT_RESET_RELEASE,
-      ATR_BOOT_OPTION_ASSERT,
-      ATR_BOOT_OPTION_RELEASE
+      ATR_BOOT_RESET_RELEASE
    );
    
     -- Atari SIO peripheral response timing.
@@ -127,7 +124,6 @@ architecture rtl of atari_sio is
    signal atr_boot_dma_addr      : unsigned(15 downto 0) := (others => '0');
    signal atr_boot_dma_req       : std_logic := '0';
    signal atr_boot_reset         : std_logic := '0';
-   signal atr_boot_option_force  : std_logic := '0';
    signal atr_boot_reset_count   : natural range 0 to 65535 := 0;
    signal manual_cold_boot_d     : std_logic := '0';
    signal dma_ready              : std_logic;
@@ -290,7 +286,6 @@ begin
    atr_boot_dma_addr_o     <= atr_boot_dma_addr;
    atr_boot_dma_req_o      <= atr_boot_dma_req;
    atr_boot_reset_o        <= atr_boot_reset;
-   atr_boot_option_force_o <= atr_boot_option_force;
 
    sio_uart_addr_o       <= sio_uart_addr;
    sio_uart_enable_o     <= sio_uart_enable;
@@ -308,7 +303,6 @@ begin
                 -- defaults
                 atr_boot_dma_req      <= '0';
                 atr_boot_reset        <= '0';
-                atr_boot_option_force <= '0';
 
             if reset_core_n = '0' then
 
@@ -329,11 +323,11 @@ begin
 
                         atr_boot_dma_active <= '0';
                     
-                        -- Track the manual OPTION + RESET combination.
+                        -- Track the manual cold-boot request for rising-edge detection.
                         manual_cold_boot_d <= manual_cold_boot_i;
                     
                         -- Start the existing cold-boot sequence only when the user
-                        -- presses OPTION + RESET with a valid ATR mounted.
+                        -- presses F11 with a valid ATR mounted.
                         if manual_cold_boot_i = '1' and
                            manual_cold_boot_d = '0' and
                            dma_req_i = '0' and
@@ -414,21 +408,7 @@ begin
                     
                         atr_boot_reset <= '0';
                     
-                        atr_boot_state <= ATR_BOOT_OPTION_ASSERT;
-                    ----------------------------------------------------------
-                    -- Match MiSTer's post-cold-reset OPTION force pulse.
-                    ----------------------------------------------------------
-                    when ATR_BOOT_OPTION_ASSERT =>
-                    
-                        atr_boot_option_force <= '1';
-                    
-                        atr_boot_state <= ATR_BOOT_OPTION_RELEASE;
-                        
-                    when ATR_BOOT_OPTION_RELEASE =>
-
-                        atr_boot_option_force <= '0';
-                    
-                        atr_boot_state <= ATR_BOOT_IDLE;   
+                        atr_boot_state <= ATR_BOOT_IDLE;
 
                   end case;
 

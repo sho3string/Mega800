@@ -181,7 +181,6 @@ signal atr_boot_dma_addr   : unsigned(15 downto 0) := (others => '0');
 signal atr_boot_dma_req    : std_logic := '0';
 signal atr_boot_reset      : std_logic := '0';
 signal atr_data_bytes      : unsigned(27 downto 0) := (others => '0');
-signal atr_boot_option_force : std_logic := '0';
 signal atari_option_force_in : std_logic;
 
 
@@ -280,7 +279,10 @@ signal atr_valid            : std_logic := '0';
 signal atr_sector_size      : unsigned(15 downto 0) := (others => '0');
 signal atr_sector_count     : unsigned(23 downto 0) := (others => '0');
    
-signal atari_reset_in : std_logic;
+signal atari_reset_in       : std_logic;
+
+signal atari_warm_reset_menu : std_logic;
+signal atari_cold_reset_menu : std_logic;
    
 -- kb constants
 constant m65_f1            : integer := 4;  -- OPTION
@@ -288,6 +290,8 @@ constant m65_f3            : integer := 5;  -- SELECT
 constant m65_f5            : integer := 6;  -- START
 constant m65_f7            : integer := 3;  -- RESET
 constant m65_f9            : integer := 68; -- HELP
+constant m65_f11           : integer := 69; -- WARM RESET
+constant m65_f13           : integer := 70; -- COLD RESET
 constant m65_restore       : integer := 75; -- Pause
 
 
@@ -301,9 +305,7 @@ begin
    --                 '1';
     prevent_reset <= '0'; -- force the reset for now until vdrives are connected properly
     
-    atr_manual_cold_boot <=
-    (not keyboard_n(m65_f7)) and
-    (not keyboard_n(m65_f1));
+    atr_manual_cold_boot <= not keyboard_n(m65_f11);
     
     -- default MiSTer config
     pokeymax_config(38 downto 36) <= "001"; -- mix_sel2
@@ -412,14 +414,9 @@ begin
         x"00" when atr_boot_dma_active = '1' else
         dma_data_i;
    
-   atari_reset_in <=
-    (not keyboard_n(m65_f7)) or
-    xex_reset_i or
-    atr_boot_reset;
+   atari_reset_in <= (not keyboard_n(m65_f7)) or xex_reset_i or atr_boot_reset;
     
-    atari_option_force_in <=
-    (not keyboard_n(m65_f1)) or
-    atr_boot_option_force;
+   atari_option_force_in <= (not keyboard_n(m65_f1));
    
    i_atari800top : entity work.atari800top
    port map (
@@ -513,7 +510,6 @@ begin
 
       WARM_RESET_MENU         => '0',
       COLD_RESET_MENU         => '0',
-
       RTC                     => rtc_i,
 
       -- CLK_CONF              => fixed NTSC configuration,
@@ -577,7 +573,6 @@ begin
          atr_boot_dma_addr_o     => atr_boot_dma_addr,
          atr_boot_dma_req_o      => atr_boot_dma_req,
          atr_boot_reset_o        => atr_boot_reset,
-         atr_boot_option_force_o => atr_boot_option_force,
          uart_data_read_i        => uart_data_read,
          sio_uart_addr_o         => sio_uart_addr,
          sio_uart_enable_o       => sio_uart_enable,
