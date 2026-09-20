@@ -142,6 +142,9 @@ entity main is
       atr_sector_count_1040_o : out std_logic;
       atr_sector4_ok_o        : out std_logic;
       
+      atari_vbxe_palette_addr_o : out std_logic_vector(9 downto 0);
+      atari_vbxe_palette_data_i : in  std_logic_vector(7 downto 0);
+      
       osm_control_i           : in  std_logic_vector(255 downto 0);
       rtc_i                   : in  std_logic_vector(64 downto 0)
    );
@@ -157,9 +160,29 @@ signal reset               : std_logic;
 signal areset              : std_logic;
 signal cpu_halt            : std_logic;
 
+-- -------------------------------------------------------------------------
+-- Standard palette
+-- -------------------------------------------------------------------------
+
 signal atari_r             : std_logic_vector(7 downto 0);
 signal atari_g             : std_logic_vector(7 downto 0);
 signal atari_b             : std_logic_vector(7 downto 0);
+
+-- -------------------------------------------------------------------------
+-- VBXE palette
+-- -------------------------------------------------------------------------
+
+signal vbxe_palette_rgb   : std_logic_vector(2 downto 0) := (others => '0');
+signal vbxe_palette_index : std_logic_vector(7 downto 0) := (others => '0');
+signal vbxe_palette_color : std_logic_vector(6 downto 0) := (others => '0');
+
+signal vbxe_palette_addr         : unsigned(9 downto 0) := (others => '0');
+signal vbxe_palette_running      : std_logic := '0';
+signal vbxe_palette_wait         : unsigned(1 downto 0) := (others => '0');
+signal vbxe_enabled_prev         : std_logic := '0';
+
+signal vbxe_palette_test_index   : unsigned(7 downto 0) := (others => '0');
+signal vbxe_palette_test_done    : std_logic := '0';
 
 signal atari_vs            : std_logic;
 signal atari_hs            : std_logic;
@@ -264,7 +287,8 @@ signal sd_blk_cnt          : vd_vec_array(G_VDNUM - 1 downto 0)(5 downto 0);
 
 signal pokeymax_config     : std_logic_vector(38 downto 0);
 
-  
+signal atari_vbxe_mode     : std_logic_vector(2 downto 0);
+
 -- ATR disk-image backend interface signals.
 -- The implementation now lives in atari_disk_image.vhd.
 signal atr_sector_read_addr : unsigned(8 downto 0);
@@ -283,6 +307,8 @@ signal atari_reset_in       : std_logic;
 
 signal atari_warm_reset_menu : std_logic;
 signal atari_cold_reset_menu : std_logic;
+
+signal atari_ram_size        : std_logic_vector(2 downto 0);
    
 -- kb constants
 constant m65_f1            : integer := 4;  -- OPTION
@@ -305,6 +331,7 @@ begin
    --                 '1';
     prevent_reset <= '0'; -- force the reset for now until vdrives are connected properly
     
+    -- cold boots machine with a valid atr image
     atr_manual_cold_boot <= not keyboard_n(m65_f11);
     
     -- default MiSTer config
@@ -354,13 +381,11 @@ begin
        atr_sector_count /= 0
     else '0';
 
-    
     atr_geometry_o <=
    "01" when atr_sector_size = to_unsigned(128, 16) else
    "10" when atr_sector_size = to_unsigned(256, 16) else
    "11" when atr_sector_size = to_unsigned(512, 16) else
    "00";
-   
    
    atr_sector_count_1040_o <=
    '1' when atr_sector_count = to_unsigned(1040, atr_sector_count'length)
@@ -372,6 +397,18 @@ begin
     
     -- Keyboard mapping mode '0' = Atari positional, '1' = MEGA65 semantic.
     mega65_kblayout <= osm_control_i(C_MENU_KBD_MEGA65);
+    
+    atari_ram_size <=
+   "000" when osm_control_i(C_MENU_RAM_8_64)       = '1' else
+   "001" when osm_control_i(C_MENU_RAM_16_128)     = '1' else
+   "010" when osm_control_i(C_MENU_RAM_32_320C)    = '1' else
+   "011";  -- 48K / 320K Rambo, also safe/default
+   
+   atari_vbxe_mode(0) <= osm_control_i(C_MENU_VBXE_D640);
+   atari_vbxe_mode(1) <= osm_control_i(C_MENU_VBXE_D740);
+   atari_vbxe_mode(2) <= osm_control_i(C_MENU_VBXE_NTSC_FIX);
+   
+   atari_vbxe_palette_addr_o <= std_logic_vector(vbxe_palette_addr);
     
    --------------------------------------------------------------------------------------------------
    -- Hard reset
@@ -500,8 +537,8 @@ begin
 
       -- CPU_SPEED             => 1x value,
       -- RAM_SIZE              => 64K value,
-      cpu_speed               => "000001",
-      RAM_SIZE                => "000",
+      cpu_speed               => "000001", -- to do later
+      RAM_SIZE                => atari_ram_size,
 
       OS_MODE_800             => atari_os_i(0),
       OS_800_16K              => atari_os_i(1),
@@ -514,10 +551,10 @@ begin
 
       -- CLK_CONF              => fixed NTSC configuration,
 
-      VBXE_MODE               => (others => '0'),
-      VBXE_PALETTE_RGB        => (others => '0'),
-      VBXE_PALETTE_INDEX      => (others => '0'),
-      VBXE_PALETTE_COLOR      => (others => '0'),
+      VBXE_MODE               => atari_vbxe_mode,
+      VBXE_PALETTE_RGB        => vbxe_palette_rgb,
+      VBXE_PALETTE_INDEX      => vbxe_palette_index,
+      VBXE_PALETTE_COLOR      => vbxe_palette_color,
 
       POKEYMAX_CONFIG         => pokeymax_config,
 
@@ -789,6 +826,83 @@ begin
          sd_buff_din_o  => sd_buff_din,
          sd_buff_wr_i   => sd_buff_wr
       );
+      
+   
+   vbxe_palette_streamer : process(clk_main_i)
+   variable vbxe_enabled : std_logic;
+    begin
+       if rising_edge(clk_main_i) then
+    
+          -- No palette write unless explicitly asserted below.
+          vbxe_palette_rgb <= "000";
+    
+          vbxe_enabled :=
+             osm_control_i(C_MENU_VBXE_D640) or
+             osm_control_i(C_MENU_VBXE_D740);
+          vbxe_enabled_prev <= vbxe_enabled;
+    
+          if reset_hard_i = '1' then
+             vbxe_palette_addr    <= (others => '0');
+             vbxe_palette_index   <= (others => '0');
+             vbxe_palette_color   <= (others => '0');
+             vbxe_palette_rgb     <= "000";
+             vbxe_palette_running <= '0';
+             vbxe_palette_wait    <= (others => '0');
+             vbxe_enabled_prev    <= '0';
+    
+          elsif vbxe_enabled = '1' and
+                vbxe_enabled_prev = '0' then
+    
+             -- Start at ACT byte 0: palette 0 red.
+             vbxe_palette_addr    <= (others => '0');
+             vbxe_palette_index   <= (others => '0');
+             vbxe_palette_rgb     <= "000";
+             vbxe_palette_running <= '1';
+    
+             -- tdp_ram uses a registered read address. After changing the
+             -- palette address, allow one main clock for the BRAM output
+             -- to update before consuming the corresponding ACT byte.
+             vbxe_palette_wait <= "01";
+    
+          elsif vbxe_palette_running = '1' then
+             if vbxe_palette_wait /= 0 then
+                vbxe_palette_wait <= vbxe_palette_wait - 1;
+    
+             else
+    
+                -- Current BRAM byte is the component selected below.
+                vbxe_palette_color <= atari_vbxe_palette_data_i(7 downto 1);
+ 
+                if vbxe_palette_addr = to_unsigned(767, 10) then
+                   -- Last byte is BLUE for palette index 255.
+                   vbxe_palette_rgb     <= "100";
+                   vbxe_palette_running <= '0';
+    
+                else
+    
+                   -- ACT order is R,G,B.
+                   case to_integer(vbxe_palette_addr) mod 3 is
+                      when 0 =>
+                         vbxe_palette_rgb <= "001";
+                      when 1 =>
+                         vbxe_palette_rgb <= "010";
+                      when 2 =>
+                         vbxe_palette_rgb <= "100";
+                         vbxe_palette_index <=
+                            std_logic_vector(unsigned(vbxe_palette_index) + 1);
+                      when others =>
+                         null;
+                   end case;
+    
+                   vbxe_palette_addr <= vbxe_palette_addr + 1;
+                   -- tdp_ram registers address_a on the rising edge, so the new
+                   -- q_a value is not visible to this process until the next clock.
+                   vbxe_palette_wait <= "01";
+                end if;
+             end if;
+          end if;
+       end if;
+    end process;
    
    i_keyboard : entity work.keyboard
    port map (

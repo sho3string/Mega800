@@ -764,6 +764,7 @@ port map
 	address_a => color_index_in,
 	data_a => cr_data_in,
 	wren_a => cr_wren,
+	clock_b => clk,
 	address_b => color_index_out,
 	q_b => data_color_r
 );
@@ -798,6 +799,7 @@ port map
 	address_a => color_index_in,
 	data_a => cg_data_in,
 	wren_a => cg_wren,
+	clock_b => clk,
 	address_b => color_index_out,
 	q_b => data_color_g
 );
@@ -833,6 +835,7 @@ port map
 	address_a => color_index_in,
 	data_a => cb_data_in,
 	wren_a => cb_wren,
+	clock_b => clk,
 	address_b => color_index_out,
 	q_b => data_color_b
 );

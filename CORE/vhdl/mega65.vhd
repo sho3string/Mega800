@@ -282,6 +282,15 @@ signal qnice_basicrom_addr     : std_logic_vector(12 downto 0);
 signal qnice_basicrom_data_to  : std_logic_vector(7 downto 0);
 signal qnice_basicrom_data_from: std_logic_vector(7 downto 0);
 
+-- VBXE palette: 768 bytes (256 x RGB)
+signal qnice_vbxe_palette_we        : std_logic;
+signal qnice_vbxe_palette_addr      : std_logic_vector(9 downto 0);
+signal qnice_vbxe_palette_data_to   : std_logic_vector(7 downto 0);
+signal qnice_vbxe_palette_data_from : std_logic_vector(7 downto 0);
+
+signal main_vbxe_palette_addr       : std_logic_vector(9 downto 0);
+signal main_vbxe_palette_data       : std_logic_vector(7 downto 0);
+
 -- D1 mounted ATR image buffer: 256 KiB
 signal qnice_d1buf_we          : std_logic;
 signal qnice_d1buf_addr        : std_logic_vector(17 downto 0);
@@ -486,6 +495,10 @@ begin
          atari_basicrom_addr_o => main_basicrom_addr,
          atari_basicrom_data_i => main_basicrom_data,
          
+         
+         atari_vbxe_palette_addr_o => main_vbxe_palette_addr,
+         atari_vbxe_palette_data_i => main_vbxe_palette_data,
+                 
          dma_addr_i             => atari_dma_addr_main,
          dma_req_i              => atari_dma_req_main,
          dma_read_enable_i      => atari_dma_read_main,
@@ -760,6 +773,10 @@ begin
        qnice_basicrom_addr    <= qnice_dev_addr_i(12 downto 0);
        qnice_basicrom_data_to <= qnice_dev_data_i(7 downto 0);
        
+       qnice_vbxe_palette_we       <= '0';
+       qnice_vbxe_palette_addr     <= qnice_dev_addr_i(9 downto 0);
+       qnice_vbxe_palette_data_to  <= qnice_dev_data_i(7 downto 0);
+       
        qnice_d1buf_we         <= '0';
        qnice_d1buf_addr       <= qnice_dev_addr_i(17 downto 0);
        
@@ -769,10 +786,7 @@ begin
        qnice_atari_ce         <= '0';
        qnice_atari_we         <= '0';
 
-qnice_csr_window := '1'
-   when qnice_dev_addr_i(27 downto 12) = x"FFFF"
-   else '0';
-       
+
        qnice_csr_window := '1' when qnice_dev_addr_i(27 downto 12) = x"FFFF" else '0';
 
     
@@ -800,6 +814,14 @@ qnice_csr_window := '1'
               qnice_dev_data_o          <= CRTROM_CSR_PT_OK when qnice_csr_window else
                                            x"00" & qnice_basicrom_data_from;
               qnice_basicrom_data_to    <= qnice_dev_data_i(7 downto 0);
+              
+           when C_DEV_ATARI_VBXE_PALETTE =>
+               qnice_vbxe_palette_addr    <= qnice_dev_addr_i(9 downto 0);
+               qnice_vbxe_palette_we      <= qnice_dev_we_i and not qnice_csr_window;
+               qnice_dev_data_o           <= CRTROM_CSR_PT_OK when qnice_csr_window else
+                                             x"00" & qnice_vbxe_palette_data_from;
+               qnice_vbxe_palette_data_to <= qnice_dev_data_i(7 downto 0);
+               
               
            when C_DEV_ATARI_D1_BUFFER =>
                qnice_d1buf_addr <= qnice_dev_addr_i(17 downto 0);
@@ -979,6 +1001,29 @@ qnice_csr_window := '1'
           data_b     => qnice_basicrom_data_to,
           wren_b     => qnice_basicrom_we,
           q_b        => qnice_basicrom_data_from
+   );
+ 
+   atari_vbxe_palette : entity work.dualport_2clk_ram
+   generic map (
+      ADDR_WIDTH => 10,
+      DATA_WIDTH => 8,
+      FALLING_A  => false,
+      FALLING_B  => true
+   )
+   port map (
+      -- Atari/main side
+      clock_a    => main_clk,
+      address_a  => main_vbxe_palette_addr,
+      data_a     => (others => '0'),
+      wren_a     => '0',
+      q_a        => main_vbxe_palette_data,
+
+      -- QNICE loader side
+      clock_b    => qnice_clk_i,
+      address_b  => qnice_vbxe_palette_addr,
+      data_b     => qnice_vbxe_palette_data_to,
+      wren_b     => qnice_vbxe_palette_we,
+      q_b        => qnice_vbxe_palette_data_from
    );
    
 ---------------------------------------------------------------------------------------------

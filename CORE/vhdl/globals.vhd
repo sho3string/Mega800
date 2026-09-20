@@ -135,15 +135,16 @@ constant C_HMAP_DEMO          : std_logic_vector(15 downto 0) := x"0200";     --
 
 -- example virtual drive handler, which is connected to nothing and only here to demo
 -- the file- and directory browsing capabilities of the firmware
-constant C_DEV_DEMO_VD          : std_logic_vector(15 downto 0) := x"0101";
-constant C_DEV_ATARI_OSROM_16K  : std_logic_vector(15 downto 0) := x"0102";
-constant C_DEV_ATARI_BASICROM   : std_logic_vector(15 downto 0) := x"0103";
-constant C_DEV_ATARI_OSROM_10K  : std_logic_vector(15 downto 0) := x"0104";
-constant C_DEV_ATARI_DMA        : std_logic_vector(15 downto 0) := x"0105";
-constant C_DEV_ATARI_D1_BUFFER  : std_logic_vector(15 downto 0) := x"0106";
+constant C_DEV_DEMO_VD           : std_logic_vector(15 downto 0) := x"0101";
+constant C_DEV_ATARI_OSROM_16K   : std_logic_vector(15 downto 0) := x"0102";
+constant C_DEV_ATARI_BASICROM    : std_logic_vector(15 downto 0) := x"0103";
+constant C_DEV_ATARI_OSROM_10K   : std_logic_vector(15 downto 0) := x"0104";
+constant C_DEV_ATARI_DMA         : std_logic_vector(15 downto 0) := x"0105";
+constant C_DEV_ATARI_D1_BUFFER   : std_logic_vector(15 downto 0) := x"0106";
+constant C_DEV_ATARI_VBXE_PALETTE: std_logic_vector(15 downto 0) := x"0107";
 
 
-constant C_DEV_DEMO_NOBUFFER    : std_logic_vector(15 downto 0) := x"AAAA";
+constant C_DEV_DEMO_NOBUFFER     : std_logic_vector(15 downto 0) := x"AAAA";
 
 -- Virtual drive management system (handled by vdrives.vhd and the firmware)
 -- If you are not using virtual drives, make sure that:
@@ -188,12 +189,13 @@ constant C_CRTROMTYPE_OPTIONAL   : std_logic_vector(15 downto 0) := x"0004";
 --       else it is a 4k window in HyperRAM or in SDRAM
 -- In case we are loading to a QNICE device, then the control and status register is located at the 4k window 0xFFFF.
 -- @TODO: See @TODO for more details about the control and status register
-constant C_CRTROMS_MAN_NUM : natural := 4;
+constant C_CRTROMS_MAN_NUM : natural := 5;
 constant C_CRTROMS_MAN : crtrom_buf_array := (
    C_CRTROMTYPE_DEVICE, C_DEV_ATARI_DMA,
    C_CRTROMTYPE_DEVICE, C_DEV_ATARI_OSROM_16K,
    C_CRTROMTYPE_DEVICE, C_DEV_ATARI_OSROM_10K,
    C_CRTROMTYPE_DEVICE, C_DEV_ATARI_BASICROM,
+   C_CRTROMTYPE_DEVICE, C_DEV_ATARI_VBXE_PALETTE,
    x"EEEE"
 );
 
@@ -220,6 +222,7 @@ constant C_CRTROMS_MAN : crtrom_buf_array := (
 constant ATARI_OS_ROM_16K       : string := "/atari800/boot0.rom" & ENDSTR;
 constant ATARI_BASIC_ROM        : string := "/atari800/boot1.rom" & ENDSTR;
 constant ATARI_OS_ROM_10K       : string := "/atari800/boot2.rom" & ENDSTR;
+constant ATARI_VBXE_PALETTE     : string := "/atari800/pal.act"   & ENDSTR;
 
 constant ATARI_OS_ROM_16K_START : std_logic_vector(15 downto 0) := x"0000";
 
@@ -228,15 +231,16 @@ constant ATARI_BASIC_ROM_START  : std_logic_vector(15 downto 0) :=
 
 constant ATARI_OS_ROM_10K_START : std_logic_vector(15 downto 0) :=
    ATARI_BASIC_ROM_START + ATARI_BASIC_ROM'length;
-
-
+constant ATARI_VBXE_PALETTE_START : std_logic_vector(15 downto 0) := 
+    ATARI_OS_ROM_10K_START + ATARI_OS_ROM_10K'length; 
 -- M2M framework constants
-constant C_CRTROMS_AUTO_NUM : natural := 3;
+constant C_CRTROMS_AUTO_NUM : natural := 4;
 
 constant C_CRTROMS_AUTO_NAMES : string :=
    ATARI_OS_ROM_16K &
    ATARI_BASIC_ROM  &
-   ATARI_OS_ROM_10K;
+   ATARI_OS_ROM_10K &
+   ATARI_VBXE_PALETTE;
 
 constant C_CRTROMS_AUTO : crtrom_buf_array := (
    C_CRTROMTYPE_DEVICE, C_DEV_ATARI_OSROM_16K,
@@ -247,6 +251,9 @@ constant C_CRTROMS_AUTO : crtrom_buf_array := (
 
    C_CRTROMTYPE_DEVICE, C_DEV_ATARI_OSROM_10K,
    C_CRTROMTYPE_OPTIONAL, ATARI_OS_ROM_10K_START,
+
+   C_CRTROMTYPE_DEVICE, C_DEV_ATARI_VBXE_PALETTE,
+   C_CRTROMTYPE_OPTIONAL, ATARI_VBXE_PALETTE_START,
 
    x"EEEE"
 );
