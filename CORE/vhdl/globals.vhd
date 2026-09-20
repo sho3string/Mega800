@@ -52,13 +52,14 @@ constant C_MENU_OS800_16K       : natural := 39;
 constant C_MENU_OS_LOAD_16K     : natural := 41;
 constant C_MENU_OS_LOAD_10K     : natural := 42;
 constant C_MENU_BASIC_LOAD      : natural := 43;
-constant C_MENU_VGA_STANDARD    : natural := 48;
-constant C_MENU_VGA_15KHZHSVS   : natural := 52;
-constant C_MENU_VGA_15KHZCS     : natural := 53;
-constant C_MENU_KBD_ATARI       : natural := 57;
-constant C_MENU_KBD_MEGA65      : natural := 58;
-constant C_MENU_PAL             : natural := 60;
-constant C_MENU_CLIP_SIDES      : natural := 61;
+
+constant C_MENU_VGA_STANDARD    : natural := 49;
+constant C_MENU_VGA_15KHZHSVS   : natural := 53;
+constant C_MENU_VGA_15KHZCS     : natural := 54;
+constant C_MENU_KBD_ATARI       : natural := 58;
+constant C_MENU_KBD_MEGA65      : natural := 59;
+constant C_MENU_PAL             : natural := 61;
+constant C_MENU_CLIP_SIDES      : natural := 62;
 
 
 ----------------------------------------------------------------------------------------------------------

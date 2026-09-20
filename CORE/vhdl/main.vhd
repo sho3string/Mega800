@@ -145,6 +145,8 @@ entity main is
       atari_vbxe_palette_addr_o : out std_logic_vector(9 downto 0);
       atari_vbxe_palette_data_i : in  std_logic_vector(7 downto 0);
       
+      atari_vbxe_palette_reload_i : in  std_logic;
+      
       osm_control_i           : in  std_logic_vector(255 downto 0);
       rtc_i                   : in  std_logic_vector(64 downto 0)
    );
@@ -851,7 +853,8 @@ begin
              vbxe_enabled_prev    <= '0';
     
           elsif vbxe_enabled = '1' and
-                vbxe_enabled_prev = '0' then
+            (vbxe_enabled_prev = '0' or
+             atari_vbxe_palette_reload_i = '1') then
     
              -- Start at ACT byte 0: palette 0 red.
              vbxe_palette_addr    <= (others => '0');

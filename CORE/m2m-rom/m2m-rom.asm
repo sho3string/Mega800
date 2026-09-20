@@ -85,37 +85,74 @@ SUBMENU_SUMMARY XOR     R8, R8                  ; R8 = 0 = no custom string
 FILTER_FILES    INCRB
                 MOVE    R9, R0
 
-                ; Never filter directories!
+                ; Never filter directories
                 CMP     1, R9
                 RBRA    _FFILES_RET_0, Z
 
-                 ; Disk image browser: only allow .ATR files
+                ; ------------------------------------------------
+                ; Disk image browser: only .ATR
+                ; ------------------------------------------------
                 CMP     CTX_MOUNT_DISKIMG, R10
-                RBRA    _FFILES_XEX, !Z
+                RBRA    _FFILES_LOADROM, !Z
 
                 MOVE    ATARI_ATRFILE, R9
                 RSUB    M2M$CHK_EXT, 1
                 RBRA    _FFILES_RET_0, C
 
-                ; Wrong extension: hide it
                 MOVE    1, R8
                 RBRA    _FFILES_RET, 1
 
 
-                ; XEX loader: only allow .XEX
-_FFILES_XEX     CMP     CTX_LOAD_ROM, R10
+                ; ------------------------------------------------
+                ; Generic LOAD_ROM browser
+                ; ------------------------------------------------
+_FFILES_LOADROM CMP     CTX_LOAD_ROM, R10
                 RBRA    _FFILES_RET_0, !Z
 
+                ; XEX group -> only .XEX
                 CMP     OPTM_G_LOAD_ATARI_XEX, R11
-                RBRA    _FFILES_RET_0, !Z
+                RBRA    _FFILES_PALETTE, !Z
 
                 MOVE    ATARI_XEXFILE, R9
                 RSUB    M2M$CHK_EXT, 1
                 RBRA    _FFILES_RET_0, C
 
-                ; Wrong extension so hide it
                 MOVE    1, R8
                 RBRA    _FFILES_RET, 1
+
+
+                ; Palette group -> only .ACT
+_FFILES_PALETTE CMP     OPTM_G_LOAD_VBXE_PALETTE, R11
+                RBRA    _FFILES_NORMAL_ROM, !Z
+
+                MOVE    ATARI_ACTFILE, R9
+                RSUB    M2M$CHK_EXT, 1
+                RBRA    _FFILES_RET_0, C
+
+                ; Palette loader: hide anything that isnt .ACT
+                MOVE    1, R8
+                RBRA    _FFILES_RET, 1
+
+
+                ; ------------------------------------------------
+                ; Normal OS/BASIC ROM loaders
+                ;
+                ; Leave normal ROM extensions unrestricted,
+                ; but explicitly hide .ACT palette files.
+                ; ------------------------------------------------
+_FFILES_NORMAL_ROM
+                MOVE    ATARI_ROMFILE, R9
+                RSUB    M2M$CHK_EXT, 1
+                RBRA    _FFILES_RET_0, C
+
+                ; Not .ROM -> hide it
+                MOVE    1, R8
+                RBRA    _FFILES_RET, 1
+
+
+_FFILES_HIDE    MOVE    1, R8
+                RBRA    _FFILES_RET, 1
+
 
 _FFILES_RET_0   XOR     R8, R8
 
@@ -229,6 +266,8 @@ CUSTOM_MSG      XOR     R8, R8
 
 ATARI_XEXFILE     .ASCII_W ".XEX"
 ATARI_ATRFILE     .ASCII_W ".ATR"
+ATARI_ACTFILE   	.ASCII_W ".ACT"
+ATARI_ROMFILE   	.ASCII_W ".ROM"
 
 ; This needs to be the last thing before the "Variables" sections starts
 END_OF_ROM      .DW 0

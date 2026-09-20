@@ -317,7 +317,7 @@ constant OPTM_S_SAVING     : string := "<Saving>";          -- the internal writ
 --             Do use a lower case \n. If you forget one of them or if you use upper case, you will run into undefined behavior.
 --          2. Start each line that contains an actual menu item (multi- or single-select) with a Space character,
 --             otherwise you will experience visual glitches.
-constant OPTM_SIZE         : natural := 64;  -- amount of items including empty lines:
+constant OPTM_SIZE         : natural := 65;  -- amount of items including empty lines:
                                              -- needs to be equal to the number of lines in OPTM_ITEMS and amount of items in OPTM_GROUPS
                                              -- IMPORTANT: If SAVE_SETTINGS is true and OPTM_SIZE changes: Make sure to re-generate and
                                              -- and re-distribute the config file. You can make a new one using M2M/tools/make_config.sh
@@ -325,7 +325,7 @@ constant OPTM_SIZE         : natural := 64;  -- amount of items including empty 
 -- Net size of the Options menu on the screen in characters (excluding the frame, which is hardcoded to two characters)
 -- Without submenus: Use OPTM_SIZE as height, otherwise count how large the actually visible main menu is.
 constant OPTM_DX           : natural := 23;
-constant OPTM_DY           : natural := 24;
+constant OPTM_DY           : natural := 25;
 
 constant OPTM_ITEMS : string :=
    " Mega 800 Alpha V1.0\n" &
@@ -379,6 +379,7 @@ constant OPTM_ITEMS : string :=
    " Load OS 16K:%s\n"      &
    " Load OS 10K:%s\n"      &
    " Load BASIC:%s\n"       &
+   " Load VBXE Palette:%s\n"&
     
    "\n"                     &
    " Back to main menu\n"   &
@@ -427,6 +428,7 @@ constant OPTM_G_VGA_MODES         : integer := 15;
 constant OPTM_G_RAM               : integer := 16;
 constant OPTM_G_VBXE              : integer := 17;
 constant OPTM_G_VBXE_NTSC_FIX     : integer := 18;
+constant OPTM_G_LOAD_VBXE_PALETTE : integer := 19;
 
 -- !!! DO NOT TOUCH !!!
 type OPTM_GTYPE is array (0 to OPTM_SIZE - 1) of integer range 0 to 2**OPTM_GTC- 1;
@@ -498,6 +500,7 @@ constant OPTM_GROUPS : OPTM_GTYPE := (
                                        OPTM_G_LOAD_ATARI_16K   + OPTM_G_LOAD_ROM,
                                        OPTM_G_LOAD_ATARI_10K   + OPTM_G_LOAD_ROM,
                                        OPTM_G_LOAD_ATARI_BASIC + OPTM_G_LOAD_ROM,
+                                       OPTM_G_LOAD_VBXE_PALETTE + OPTM_G_LOAD_ROM,
                                     
                                        OPTM_G_LINE,
                                        OPTM_G_CLOSE + OPTM_G_SUBMENU,

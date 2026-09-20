@@ -291,6 +291,14 @@ signal qnice_vbxe_palette_data_from : std_logic_vector(7 downto 0);
 signal main_vbxe_palette_addr       : std_logic_vector(9 downto 0);
 signal main_vbxe_palette_data       : std_logic_vector(7 downto 0);
 
+signal qnice_vbxe_palette_reload : std_logic := '0';
+signal vbxe_palette_reload_qnice_vec : std_logic_vector(0 downto 0);
+signal vbxe_palette_reload_main_vec  : std_logic_vector(0 downto 0);
+signal vbxe_palette_reload_prev : std_logic := '0';
+signal vbxe_palette_reload_main : std_logic := '0';
+signal vbxe_palette_written_qnice     : std_logic := '0';
+signal vbxe_palette_csr_written_qnice : std_logic := '0';
+
 -- D1 mounted ATR image buffer: 256 KiB
 signal qnice_d1buf_we          : std_logic;
 signal qnice_d1buf_addr        : std_logic_vector(17 downto 0);
@@ -458,6 +466,8 @@ begin
    video_vblank_o   <= video_vblank;
    
    main_osrom_data <= main_osrom10_data when atari_os_rom(0) = '1' and atari_os_rom(1) = '0' else main_osrom16_data; 
+   
+   vbxe_palette_reload_qnice_vec(0) <= qnice_vbxe_palette_reload;
 
 
    ---------------------------------------------------------------------------------------------
@@ -498,6 +508,7 @@ begin
          
          atari_vbxe_palette_addr_o => main_vbxe_palette_addr,
          atari_vbxe_palette_data_i => main_vbxe_palette_data,
+         atari_vbxe_palette_reload_i => vbxe_palette_reload_main,
                  
          dma_addr_i             => atari_dma_addr_main,
          dma_req_i              => atari_dma_req_main,
@@ -689,8 +700,7 @@ begin
              end if;
           end if;
      end process;
-       
-       
+
     
    ---------------------------------------------------------------------------------------------
    -- Audio and video settings (QNICE clock domain)
@@ -838,7 +848,7 @@ begin
                qnice_xex_we       <= qnice_dev_we_i;
                qnice_dev_data_o   <= qnice_xex_data;
                qnice_dev_wait_o   <= qnice_xex_wait;
-        
+
            when others =>
               null;
         
@@ -848,16 +858,22 @@ begin
     rom_load_detect : process(qnice_clk_i)
     begin
        if falling_edge(qnice_clk_i) then
-    
           if qnice_rst_i = '1' then
-             rom_written_qnice     <= '0';
-             rom_csr_written_qnice <= '0';
-             rom_loaded_toggle     <= '0';
+             rom_written_qnice                <= '0';
+             rom_csr_written_qnice            <= '0';
+             rom_loaded_toggle                <= '0';
+
+             vbxe_palette_written_qnice        <= '0';
+             vbxe_palette_csr_written_qnice    <= '0';
+             qnice_vbxe_palette_reload         <= '0';
     
           elsif qnice_dev_ce_i = '1' then
     
              case qnice_dev_id_i is
     
+                ---------------------------------------------------------
+                -- OS/BASIC ROM load completion
+                ---------------------------------------------------------
                 when C_DEV_ATARI_OSROM_16K |
                      C_DEV_ATARI_OSROM_10K |
                      C_DEV_ATARI_BASICROM =>
@@ -866,37 +882,55 @@ begin
     
                       -- ROM payload byte written.
                       if qnice_dev_we_i = '1' then
-                         rom_written_qnice <= '1';
+                         rom_written_qnice     <= '1';
                          rom_csr_written_qnice <= '0';
                       end if;
-    
                    else
-    
                       -- Manual loader writes CSR information after the
                       -- ROM file itself has been transferred.
                       if qnice_dev_we_i = '1' and
                          rom_written_qnice = '1' then
-    
                          rom_csr_written_qnice <= '1';
-    
-                      -- Only accept the subsequent CSR read as a completed
-                      -- manual ROM load if we saw both phases.
+                      -- Subsequent CSR read means the load is complete.
                       elsif qnice_dev_we_i = '0' and
                             rom_written_qnice = '1' and
                             rom_csr_written_qnice = '1' then
-    
                          rom_loaded_toggle     <= not rom_loaded_toggle;
                          rom_written_qnice     <= '0';
                          rom_csr_written_qnice <= '0';
-    
                       end if;
                    end if;
     
+    
+                ---------------------------------------------------------
+                -- VBXE palette load completion
+                ---------------------------------------------------------
+                when C_DEV_ATARI_VBXE_PALETTE =>
+                   if qnice_dev_addr_i(27 downto 12) /= x"FFFF" then
+                      -- Palette payload byte written.
+                      if qnice_dev_we_i = '1' then
+                         vbxe_palette_written_qnice     <= '1';
+                         vbxe_palette_csr_written_qnice <= '0';
+                      end if;
+                   else
+                      -- Generic CRT/ROM loader performs CSR writes
+                      -- after transferring the palette.
+                      if qnice_dev_we_i = '1' and
+                         vbxe_palette_written_qnice = '1' then
+                         vbxe_palette_csr_written_qnice <= '1';
+                      -- First subsequent CSR read marks completion.
+                      elsif qnice_dev_we_i = '0' and
+                            vbxe_palette_written_qnice = '1' and
+                            vbxe_palette_csr_written_qnice = '1' then
+                         qnice_vbxe_palette_reload <=
+                            not qnice_vbxe_palette_reload;
+                         vbxe_palette_written_qnice     <= '0';
+                         vbxe_palette_csr_written_qnice <= '0';
+                      end if;
+                   end if;
                 when others =>
                    null;
-    
              end case;
-    
           end if;
        end if;
     end process;
@@ -913,6 +947,44 @@ begin
              rom_loaded_reset <= '1';
           else
              rom_loaded_reset <= '0';
+          end if;
+    
+       end if;
+    end process;
+    
+     i_vbxe_palette_reload_cdc : xpm_cdc_array_single
+    generic map (
+       WIDTH => 1
+    )
+    port map (
+       src_clk  => qnice_clk_i,
+       src_in   => vbxe_palette_reload_qnice_vec,
+    
+       dest_clk => main_clk,
+       dest_out => vbxe_palette_reload_main_vec
+    );
+       
+       
+    
+    vbxe_palette_reload_pulse : process(main_clk)
+    begin
+       if rising_edge(main_clk) then
+    
+          if main_rst = '1' then
+             vbxe_palette_reload_prev <= vbxe_palette_reload_main_vec(0);
+             vbxe_palette_reload_main <= '0';
+    
+          else
+             if vbxe_palette_reload_main_vec(0) /=
+                vbxe_palette_reload_prev then
+    
+                vbxe_palette_reload_main <= '1';
+             else
+                vbxe_palette_reload_main <= '0';
+             end if;
+    
+             vbxe_palette_reload_prev <=
+                vbxe_palette_reload_main_vec(0);
           end if;
     
        end if;
@@ -936,27 +1008,27 @@ begin
        end if;
     end process;
     
-    atari_osrom16 : entity work.dualport_2clk_ram
-       generic map (
-          ADDR_WIDTH => 14,
-          DATA_WIDTH => 8,
-          FALLING_A  => false,
-          FALLING_B  => true
-       )
-       port map (
-          -- Atari core side
-          clock_a    => main_clk,
-          address_a  => main_osrom_addr,
-          data_a     => (others => '0'),
-          wren_a     => '0',
-          q_a        => main_osrom16_data,
-    
-          -- QNICE loader side
-          clock_b    => qnice_clk_i,
-          address_b  => qnice_osrom_addr,
-          data_b     => qnice_osrom_data_to,
-          wren_b     => qnice_osrom_we,
-          q_b        => qnice_osrom_data_from
+   atari_osrom16 : entity work.dualport_2clk_ram
+   generic map (
+      ADDR_WIDTH => 14,
+      DATA_WIDTH => 8,
+      FALLING_A  => false,
+      FALLING_B  => true
+   )
+   port map (
+      -- Atari core side
+      clock_a    => main_clk,
+      address_a  => main_osrom_addr,
+      data_a     => (others => '0'),
+      wren_a     => '0',
+      q_a        => main_osrom16_data,
+
+      -- QNICE loader side
+      clock_b    => qnice_clk_i,
+      address_b  => qnice_osrom_addr,
+      data_b     => qnice_osrom_data_to,
+      wren_b     => qnice_osrom_we,
+      q_b        => qnice_osrom_data_from
    );
    
    atari_osrom10 : entity work.dualport_2clk_ram
@@ -981,26 +1053,26 @@ begin
    );
    
    atari_basicrom : entity work.dualport_2clk_ram
-       generic map (
-          ADDR_WIDTH => 13,
-          DATA_WIDTH => 8,
-          FALLING_A  => false,
-          FALLING_B  => true
-       )
-       port map (
-          -- Atari core side
-          clock_a    => main_clk,
-          address_a  => main_basicrom_addr,
-          data_a     => (others => '0'),
-          wren_a     => '0',
-          q_a        => main_basicrom_data,
-    
-          -- QNICE loader side
-          clock_b    => qnice_clk_i,
-          address_b  => qnice_basicrom_addr,
-          data_b     => qnice_basicrom_data_to,
-          wren_b     => qnice_basicrom_we,
-          q_b        => qnice_basicrom_data_from
+   generic map (
+      ADDR_WIDTH => 13,
+      DATA_WIDTH => 8,
+      FALLING_A  => false,
+      FALLING_B  => true
+   )
+   port map (
+      -- Atari core side
+      clock_a    => main_clk,
+      address_a  => main_basicrom_addr,
+      data_a     => (others => '0'),
+      wren_a     => '0',
+      q_a        => main_basicrom_data,
+
+      -- QNICE loader side
+      clock_b    => qnice_clk_i,
+      address_b  => qnice_basicrom_addr,
+      data_b     => qnice_basicrom_data_to,
+      wren_b     => qnice_basicrom_we,
+      q_b        => qnice_basicrom_data_from
    );
  
    atari_vbxe_palette : entity work.dualport_2clk_ram
