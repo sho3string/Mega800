@@ -46,20 +46,21 @@ constant C_MENU_RAM_48_320R     : natural := 30; -- 011           48K           
 constant C_MENU_VBXE_DISABLED   : natural := 32;
 constant C_MENU_VBXE_D640       : natural := 33;
 constant C_MENU_VBXE_D740       : natural := 34;
-constant C_MENU_VBXE_NTSC_FIX   : natural := 36;
+constant C_MENU_VBXE_NTSC_FIX   : natural := 35;
+
 constant C_MENU_OS800_10K       : natural := 38;
 constant C_MENU_OS800_16K       : natural := 39;
 constant C_MENU_OS_LOAD_16K     : natural := 41;
 constant C_MENU_OS_LOAD_10K     : natural := 42;
 constant C_MENU_BASIC_LOAD      : natural := 43;
 
-constant C_MENU_VGA_STANDARD    : natural := 49;
-constant C_MENU_VGA_15KHZHSVS   : natural := 53;
-constant C_MENU_VGA_15KHZCS     : natural := 54;
-constant C_MENU_KBD_ATARI       : natural := 58;
-constant C_MENU_KBD_MEGA65      : natural := 59;
-constant C_MENU_PAL             : natural := 61;
-constant C_MENU_CLIP_SIDES      : natural := 62;
+constant C_MENU_VGA_STANDARD    : natural := 48;
+constant C_MENU_VGA_15KHZHSVS   : natural := 52;
+constant C_MENU_VGA_15KHZCS     : natural := 53;
+constant C_MENU_KBD_ATARI       : natural := 57;
+constant C_MENU_KBD_MEGA65      : natural := 58;
+constant C_MENU_PAL             : natural := 60;
+constant C_MENU_CLIP_SIDES      : natural := 61;
 
 
 ----------------------------------------------------------------------------------------------------------
@@ -193,10 +194,10 @@ constant C_CRTROMTYPE_OPTIONAL   : std_logic_vector(15 downto 0) := x"0004";
 constant C_CRTROMS_MAN_NUM : natural := 5;
 constant C_CRTROMS_MAN : crtrom_buf_array := (
    C_CRTROMTYPE_DEVICE, C_DEV_ATARI_DMA,
+   C_CRTROMTYPE_DEVICE, C_DEV_ATARI_VBXE_PALETTE,
    C_CRTROMTYPE_DEVICE, C_DEV_ATARI_OSROM_16K,
    C_CRTROMTYPE_DEVICE, C_DEV_ATARI_OSROM_10K,
    C_CRTROMTYPE_DEVICE, C_DEV_ATARI_BASICROM,
-   C_CRTROMTYPE_DEVICE, C_DEV_ATARI_VBXE_PALETTE,
    x"EEEE"
 );
 

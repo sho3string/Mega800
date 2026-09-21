@@ -317,7 +317,7 @@ constant OPTM_S_SAVING     : string := "<Saving>";          -- the internal writ
 --             Do use a lower case \n. If you forget one of them or if you use upper case, you will run into undefined behavior.
 --          2. Start each line that contains an actual menu item (multi- or single-select) with a Space character,
 --             otherwise you will experience visual glitches.
-constant OPTM_SIZE         : natural := 65;  -- amount of items including empty lines:
+constant OPTM_SIZE         : natural := 64;  -- amount of items including empty lines:
                                              -- needs to be equal to the number of lines in OPTM_ITEMS and amount of items in OPTM_GROUPS
                                              -- IMPORTANT: If SAVE_SETTINGS is true and OPTM_SIZE changes: Make sure to re-generate and
                                              -- and re-distribute the config file. You can make a new one using M2M/tools/make_config.sh
@@ -369,8 +369,8 @@ constant OPTM_ITEMS : string :=
    " VBXE: Disabled\n"      &
    " VBXE: $D640\n"         &
    " VBXE: $D740\n"         &
-   "\n"                     &
    " Fix VBXE NTSC bug\n"   &
+   " Load VBXE Palette:%s\n"&
    "\n"                     &
 
    " 400/800 OS: 10K\n"     &
@@ -379,7 +379,6 @@ constant OPTM_ITEMS : string :=
    " Load OS 16K:%s\n"      &
    " Load OS 10K:%s\n"      &
    " Load BASIC:%s\n"       &
-   " Load VBXE Palette:%s\n"&
     
    "\n"                     &
    " Back to main menu\n"   &
@@ -485,22 +484,19 @@ constant OPTM_GROUPS : OPTM_GTYPE := (
                                        OPTM_G_VBXE + OPTM_G_STDSEL,                           -- VBXE Disabled
                                        OPTM_G_VBXE,                                           -- VBXE $D640
                                        OPTM_G_VBXE,                                           -- VBXE $D740
-
-                                       OPTM_G_LINE,
-
                                        OPTM_G_VBXE_NTSC_FIX + OPTM_G_SINGLESEL,               -- Fix VBXE NTSC bug
+                                       OPTM_G_LOAD_VBXE_PALETTE + OPTM_G_LOAD_ROM,             -- Load VBXE Palette
 
                                        OPTM_G_LINE,
 
-                                       OPTM_G_OS800_TYPE + OPTM_G_STDSEL,                     -- 10K
-                                       OPTM_G_OS800_TYPE,                                     -- 16K
-                                    
+                                       OPTM_G_OS800_TYPE + OPTM_G_STDSEL,                      -- 10K
+                                       OPTM_G_OS800_TYPE,                                      -- 16K
+
                                        OPTM_G_LINE,
-                                    
+
                                        OPTM_G_LOAD_ATARI_16K   + OPTM_G_LOAD_ROM,
                                        OPTM_G_LOAD_ATARI_10K   + OPTM_G_LOAD_ROM,
                                        OPTM_G_LOAD_ATARI_BASIC + OPTM_G_LOAD_ROM,
-                                       OPTM_G_LOAD_VBXE_PALETTE + OPTM_G_LOAD_ROM,
                                     
                                        OPTM_G_LINE,
                                        OPTM_G_CLOSE + OPTM_G_SUBMENU,
