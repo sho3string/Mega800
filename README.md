@@ -511,6 +511,8 @@ Known console/reset mappings include:
 | **F5**       | START                      |
 | **F11**      | Cold boot/reset            |
 | **F1 + F11** | Cold boot with OPTION held |
+| **F7**       | WARM reset                 |
+| **F9**       | HELP                       |
 
 The keyboard mapping mode can be changed from the core menu.
 
