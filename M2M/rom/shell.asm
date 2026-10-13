@@ -584,8 +584,11 @@ _HM_SDMOUNTED6A MOVE    R9, R6                  ; R6: disk image type
                 MOVE    @R9, R9                 ; R9: file size: low word
                 ADD     FAT32$FDH_SIZE_HI, R10
                 MOVE    @R10, R10               ; R10: file size: high word
-                XOR     R11, R11                ; 0=read/write disk
-                MOVE    R6, R12                 ; R12: disk image type
+                XOR     R11, R11                ; default: read/write ATR
+                CMP     1, R7                   ; drive 1 is read-only CAS
+                RBRA    _HM_CAS_RO_DONE, !Z
+                MOVE    1, R11
+_HM_CAS_RO_DONE MOVE    R6, R12                 ; R12: disk image type
                 RSUB    VD_STROBE_IM, 1         ; notify MiSTer
 
                 MOVE    LOG_STR_MOUNT, R8
@@ -768,6 +771,15 @@ _LI_FOPEN_OK    MOVE    R5, R8
                 MOVE    R9, R7                  ; R7: img type or error msg
                 CMP     0, R6                   ; everything OK?
                 RBRA    _LI_FREAD_RET, !Z       ; no
+
+                ; CAS drive 1: retain the FAT32 handle and stream on demand.
+                ; Do not copy the CAS image into a RAM backing device.
+                CMP     0, R4                   ; virtual drive mode?
+                RBRA    _LI_CAS_CHECK_DONE, !Z  ; no: CRT/ROM
+                CMP     1, R12                  ; virtual drive 1 (CAS)?
+                RBRA    _LI_CAS_CHECK_DONE, !Z  ; no: normal ATR loading
+                RBRA    _LI_FREAD_RET, 1        ; R6=0, R7=image type
+_LI_CAS_CHECK_DONE
 
                 ; For showing a progress bar: Take the remaining size of the
                 ; file, which is filesize minus current read position after
@@ -1040,6 +1052,9 @@ _HANDLE_IO_RET  SYSCALL(leave, 1)
 ; @TODO: Sanity check as described in vdrives.vhd protocol comment (3)
 HANDLE_DRV_RD   SYSCALL(enter, 1)
 
+                CMP     1, R8                   ; CAS drive 1?
+                RBRA    _HDR_CAS, Z             ; stream directly from FAT32
+
                 MOVE    R8, R11                 ; R11: virtual drive ID
 
                 MOVE    VD_SIZEB, R9            ; virtual drive ID still in R8
@@ -1105,6 +1120,81 @@ _HDR_SEND_DONE  MOVE    R11, R8                 ; virtual drive ID
                 XOR     R10, R10
                 RSUB    VD_DRV_WRITE, 1
 
+                SYSCALL(leave, 1)
+                RET
+
+; CAS drive 1: service the requested 512-byte block directly from FAT32.
+; This path does not use VDRIVES_BUFS or an image-sized RAM device.
+_HDR_CAS        MOVE    HNDL_VD_FILES, R9
+                ADD     1, R9
+                MOVE    @R9, R11                ; R11: CAS file handle
+
+                MOVE    1, R8
+                MOVE    VD_BYTES_L, R9
+                RSUB    VD_DRV_READ, 1
+                MOVE    R8, R12                 ; file offset low word
+                MOVE    1, R8
+                MOVE    VD_BYTES_H, R9
+                RSUB    VD_DRV_READ, 1
+                MOVE    R8, R10                 ; file offset high word
+
+                MOVE    R11, R8
+                MOVE    R12, R9
+                SYSCALL(f32_fseek, 1)
+                CMP     0, R9
+                RBRA    _HDR_CAS_SEEK_OK, Z
+                MOVE    ERR_FATAL_SEEK, R8
+                RBRA    FATAL, 1
+
+_HDR_CAS_SEEK_OK
+                MOVE    1, R8
+                MOVE    VD_SIZEB, R9
+                RSUB    VD_DRV_READ, 1
+                MOVE    R8, R0                  ; requested transfer size
+                XOR     R6, R6                  ; byte index
+                XOR     R5, R5                  ; EOF flag (zero-pad rest)
+
+                MOVE    1, R8
+                MOVE    VD_ACK, R9
+                MOVE    1, R10
+                RSUB    VD_DRV_WRITE, 1
+
+_HDR_CAS_NEXT   CMP     R6, R0
+                RBRA    _HDR_CAS_DONE, Z
+                CMP     0, R5                   ; already reached EOF?
+                RBRA    _HDR_CAS_PAD, !Z         ; yes: no more FAT32 reads
+                MOVE    R11, R8
+                SYSCALL(f32_fread, 1)
+                CMP     0, R10
+                RBRA    _HDR_CAS_BYTE_OK, Z
+                CMP     FAT32$EOF, R10
+                RBRA    _HDR_CAS_EOF, Z
+                MOVE    ERR_FATAL_LOAD, R8      ; genuine FAT32 read error
+                MOVE    R10, R9
+                RBRA    FATAL, 1
+
+_HDR_CAS_EOF    MOVE    1, R5                   ; zero-fill remaining bytes
+_HDR_CAS_PAD    XOR     R9, R9
+_HDR_CAS_BYTE_OK
+                MOVE    R9, R12                 ; preserve byte across calls
+                MOVE    VD_B_ADDR, R8
+                MOVE    R6, R9
+                RSUB    VD_CAD_WRITE, 1
+                MOVE    VD_B_DOUT, R8
+                MOVE    R12, R9
+                RSUB    VD_CAD_WRITE, 1
+                MOVE    VD_B_WREN, R8
+                MOVE    1, R9
+                RSUB    VD_CAD_WRITE, 1
+                XOR     R9, R9
+                RSUB    VD_CAD_WRITE, 1
+                ADD     1, R6
+                RBRA    _HDR_CAS_NEXT, 1
+
+_HDR_CAS_DONE   MOVE    1, R8
+                MOVE    VD_ACK, R9
+                XOR     R10, R10
+                RSUB    VD_DRV_WRITE, 1
                 SYSCALL(leave, 1)
                 RET
 

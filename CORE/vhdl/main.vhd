@@ -48,6 +48,7 @@ use work.vdrives_pkg.all;
 
 library xpm;
 use xpm.vcomponents.xpm_cdc_array_single;
+use xpm.vcomponents.xpm_cdc_async_rst;
 
 entity main is
    generic (
@@ -286,6 +287,32 @@ signal sd_ack              : vd_std_array(G_VDNUM - 1 downto 0);
 signal sd_rd               : vd_std_array(G_VDNUM - 1 downto 0);
 signal sd_wr               : vd_std_array(G_VDNUM - 1 downto 0);
 signal sd_blk_cnt          : vd_vec_array(G_VDNUM - 1 downto 0)(5 downto 0);
+
+signal atr_sd_lba      : vd_vec_array(G_VDNUM - 1 downto 0)(31 downto 0);
+signal atr_sd_blk_cnt  : vd_vec_array(G_VDNUM - 1 downto 0)(5 downto 0);
+signal atr_sd_rd       : vd_std_array(G_VDNUM - 1 downto 0);
+signal atr_sd_wr       : vd_std_array(G_VDNUM - 1 downto 0);
+signal atr_sd_buff_din : vd_vec_array(G_VDNUM - 1 downto 0)(7 downto 0);
+
+signal cas_sd_lba       : std_logic_vector(31 downto 0);
+signal cas_sd_blk_cnt   : std_logic_vector(5 downto 0);
+signal cas_sd_rd        : std_logic;
+signal cas_mount_size   : std_logic_vector(31 downto 0) := (others => '0');
+signal cas_mount_size_q : std_logic_vector(31 downto 0);
+signal cas_mount_event  : std_logic_vector(1 downto 0);
+signal cas_mount_event_q: std_logic_vector(1 downto 0);
+signal cas_mount_event_delayed : std_logic_vector(1 downto 0) := (others => '0');
+signal cas_mount_delay : std_logic_vector(7 downto 0) := (others => '0');
+signal cas_mount_prev   : std_logic := '0';
+signal cas_reset_qnice  : std_logic;
+signal cas_valid        : std_logic;
+signal cas_error        : std_logic;
+signal cas_position     : std_logic_vector(31 downto 0);
+signal cas_baud         : std_logic_vector(15 downto 0);
+signal cas_data_seen    : std_logic;
+signal cas_chunk_length : std_logic_vector(15 downto 0);
+signal cas_chunk_silence: std_logic_vector(15 downto 0);
+
 
 signal pokeymax_config     : std_logic_vector(38 downto 0);
 
@@ -818,18 +845,117 @@ begin
          atr_sector_size_qnice_o  => atr_sector_size,
          atr_sector_count_qnice_o => atr_sector_count,
 
-         sd_lba_o       => sd_lba,
-         sd_blk_cnt_o   => sd_blk_cnt,
-         sd_rd_o        => sd_rd,
-         sd_wr_o        => sd_wr,
+         sd_lba_o       => atr_sd_lba,
+         sd_blk_cnt_o   => atr_sd_blk_cnt,
+         sd_rd_o        => atr_sd_rd,
+         sd_wr_o        => atr_sd_wr,
          sd_ack_i       => sd_ack,
          sd_buff_addr_i => sd_buff_addr,
          sd_buff_dout_i => sd_buff_dout,
-         sd_buff_din_o  => sd_buff_din,
+         sd_buff_din_o  => atr_sd_buff_din,
          sd_buff_wr_i   => sd_buff_wr
       );
       
    
+
+   -- Separate virtual-drive ownership: ATR=D0, CAS=D1.
+   assert G_VDNUM >= 2 report "Atari CAS requires G_VDNUM >= 2" severity failure;
+   sd_lba(0) <= atr_sd_lba(0);
+   sd_blk_cnt(0) <= atr_sd_blk_cnt(0);
+   sd_rd(0) <= atr_sd_rd(0);
+   sd_wr(0) <= atr_sd_wr(0);
+   sd_buff_din(0) <= atr_sd_buff_din(0);
+
+   sd_lba(1) <= cas_sd_lba;
+   sd_blk_cnt(1) <= cas_sd_blk_cnt;
+   sd_rd(1) <= cas_sd_rd;
+   sd_wr(1) <= '0';
+   sd_buff_din(1) <= (others => '0');
+
+   -- img_size is shared; capture only on the CAS mount-event transition.
+   process(clk_main_i)
+   begin
+      if rising_edge(clk_main_i) then
+         if reset_core_n = '0' then
+            cas_mount_prev <= disk_change(1);
+            cas_mount_size <= (others => '0');
+         else
+            cas_mount_prev <= disk_change(1);
+            if disk_change(1) /= cas_mount_prev then
+               cas_mount_size <= img_size;
+            end if;
+         end if;
+      end if;
+   end process;
+
+   cas_mount_event <= disk_change(1) & vdrives_mounted(1);
+
+   i_cas_mount_cdc : xpm_cdc_array_single
+      generic map (WIDTH => 2)
+      port map (
+         src_clk => clk_main_i,
+         src_in => cas_mount_event,
+         dest_clk => atari_qnice_clk_i,
+         dest_out => cas_mount_event_q
+      );
+
+   i_cas_size_cdc : xpm_cdc_array_single
+      generic map (WIDTH => 32)
+      port map (
+         src_clk => clk_main_i,
+         src_in => cas_mount_size,
+         dest_clk => atari_qnice_clk_i,
+         dest_out => cas_mount_size_q
+      );
+
+   -- Allow the independently synchronized image-size bus to settle before
+   -- presenting the CAS mount toggle to the reader.
+   process(atari_qnice_clk_i)
+   begin
+      if rising_edge(atari_qnice_clk_i) then
+         cas_mount_delay <= cas_mount_delay(6 downto 0) & cas_mount_event_q(1);
+         cas_mount_event_delayed <= cas_mount_delay(7) & cas_mount_event_q(0);
+      end if;
+   end process;
+
+   -- Reset originates in main_clk. Assert asynchronously, release
+   -- synchronously in the QNICE clock domain before resetting CAS logic.
+   i_cas_reset_cdc : xpm_cdc_async_rst
+      generic map (
+         DEST_SYNC_FF    => 4,
+         INIT_SYNC_FF    => 0,
+         RST_ACTIVE_HIGH => 1
+      )
+      port map (
+         src_arst  => not reset_core_n,
+         dest_clk  => atari_qnice_clk_i,
+         dest_arst => cas_reset_qnice
+      );
+
+   i_atari_cas : entity work.atari_cas
+      port map (
+         qnice_clk_i => atari_qnice_clk_i,
+         reset_i => cas_reset_qnice,
+         cas_change_toggle_i => cas_mount_event_delayed(1),
+         cas_mounted_i => cas_mount_event_q(0),
+         cas_size_i => cas_mount_size_q,
+         sd_lba_o => cas_sd_lba,
+         sd_blk_cnt_o => cas_sd_blk_cnt,
+         sd_rd_o => cas_sd_rd,
+         sd_ack_i => sd_ack(1),
+         sd_buff_addr_i => sd_buff_addr,
+         sd_buff_dout_i => sd_buff_dout,
+         sd_buff_wr_i => sd_buff_wr,
+         sd_buff_cas_i => sd_ack(1),
+         cas_valid_o => cas_valid,
+         cas_error_o => cas_error,
+         cas_position_o => cas_position,
+         cas_baud_o => cas_baud,
+         cas_data_chunk_o => cas_data_seen,
+         cas_chunk_length_o => cas_chunk_length,
+         cas_chunk_silence_o => cas_chunk_silence
+      );
+
    vbxe_palette_streamer : process(clk_main_i)
    variable vbxe_enabled : std_logic;
     begin

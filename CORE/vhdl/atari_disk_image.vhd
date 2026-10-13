@@ -176,7 +176,7 @@ begin
     begin
        if rising_edge(qnice_clk_i) then
     
-          if sd_buff_wr = '1' then
+          if sd_buff_wr = '1' and sd_ack(0) = '1' then
              atr_block_buffer(to_integer(unsigned(sd_buff_addr))) <= sd_buff_dout;
           end if;
     
