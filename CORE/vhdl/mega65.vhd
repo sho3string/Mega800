@@ -304,6 +304,10 @@ signal qnice_d1buf_we          : std_logic;
 signal qnice_d1buf_addr        : std_logic_vector(17 downto 0);
 signal qnice_d1buf_data_from   : std_logic_vector(7 downto 0);
 
+signal qnice_casbuf_we         : std_logic;
+signal qnice_casbuf_addr       : std_logic_vector(17 downto 0);
+signal qnice_casbuf_data_from  : std_logic_vector(7 downto 0);
+
 signal main_osrom_addr         : std_logic_vector(13 downto 0);
 signal main_osrom_data         : std_logic_vector(7 downto 0);
 
@@ -837,7 +841,7 @@ begin
                qnice_d1buf_addr <= qnice_dev_addr_i(17 downto 0);
                qnice_d1buf_we   <= qnice_dev_we_i;
                qnice_dev_data_o <= x"00" & qnice_d1buf_data_from;
-              
+
            when C_VD_DEVICE =>
                qnice_atari_ce   <= qnice_dev_ce_i;
                qnice_atari_we   <= qnice_dev_we_i;

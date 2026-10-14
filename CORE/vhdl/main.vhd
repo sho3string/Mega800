@@ -634,6 +634,14 @@ begin
 
          sio_drive_activity_o => sio_drive_activity
       );
+      
+      
+   -- Drive 1: inactive for two-drive boot test
+    sd_lba(1)      <= (others => '0');
+    sd_blk_cnt(1)  <= (others => '0');
+    sd_rd(1)       <= '0';
+    sd_wr(1)       <= '0';
+    sd_buff_din(1) <= (others => '0');
 
    i_vdrives : entity work.vdrives
       generic map (
