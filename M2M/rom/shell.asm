@@ -763,11 +763,31 @@ _LI_FOPEN_OK    MOVE    R5, R8
                 MOVE    @R9, R9
                 MOVE    SF_CONTEXT_DATA, R10
                 MOVE    @R10, R10
-                RSUB    PREP_LOAD_IMAGE, 1
+				
+;                RSUB    PREP_LOAD_IMAGE, 1
+;                MOVE    R8, R6                  ; R6: error code=0 (means OK)
+;                MOVE    R9, R7                  ; R7: img type or error msg
+;                CMP     0, R6                   ; everything OK?
+;                RBRA    _LI_FREAD_RET, !Z       ; no
+
+				RSUB    PREP_LOAD_IMAGE, 1
                 MOVE    R8, R6                  ; R6: error code=0 (means OK)
                 MOVE    R9, R7                  ; R7: img type or error msg
                 CMP     0, R6                   ; everything OK?
                 RBRA    _LI_FREAD_RET, !Z       ; no
+
+                ; Cassette (virtual drive 1):
+                ; Keep the FAT32 file handle and image metadata,
+                ; but do not copy the file into the shared D1 buffer.
+                CMP     0, R4                   ; virtual drive mode?
+                RBRA    _LI_CAS_DONE, !Z        ; no: normal CRT/ROM loading
+                CMP     1, R12                  ; cassette drive?
+                RBRA    _LI_CAS_DONE, !Z        ; no: normal ATR loading
+
+                XOR     R6, R6                  ; success
+                RBRA    _LI_FREAD_RET, 1
+
+_LI_CAS_DONE
 
                 ; For showing a progress bar: Take the remaining size of the
                 ; file, which is filesize minus current read position after
