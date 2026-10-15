@@ -287,6 +287,14 @@ signal sd_rd               : vd_std_array(G_VDNUM - 1 downto 0);
 signal sd_wr               : vd_std_array(G_VDNUM - 1 downto 0);
 signal sd_blk_cnt          : vd_vec_array(G_VDNUM - 1 downto 0)(5 downto 0);
 
+-- ATR owns virtual drive 0; cassette will own virtual drive 1.
+-- Separate output buses prevent multiple drivers when CAS is connected.
+signal atr_sd_lba      : vd_vec_array(G_VDNUM - 1 downto 0)(31 downto 0);
+signal atr_sd_blk_cnt  : vd_vec_array(G_VDNUM - 1 downto 0)(5 downto 0);
+signal atr_sd_rd       : vd_std_array(G_VDNUM - 1 downto 0);
+signal atr_sd_wr       : vd_std_array(G_VDNUM - 1 downto 0);
+signal atr_sd_buff_din : vd_vec_array(G_VDNUM - 1 downto 0)(7 downto 0);
+
 signal pokeymax_config     : std_logic_vector(38 downto 0);
 
 signal atari_vbxe_mode     : std_logic_vector(2 downto 0);
@@ -636,6 +644,13 @@ begin
       );
       
       
+   -- ATR is the only owner of virtual drive 0.
+   sd_lba(0)      <= atr_sd_lba(0);
+   sd_blk_cnt(0)  <= atr_sd_blk_cnt(0);
+   sd_rd(0)       <= atr_sd_rd(0);
+   sd_wr(0)       <= atr_sd_wr(0);
+   sd_buff_din(0) <= atr_sd_buff_din(0);
+
    -- Drive 1: inactive for two-drive boot test
     sd_lba(1)      <= (others => '0');
     sd_blk_cnt(1)  <= (others => '0');
@@ -826,14 +841,14 @@ begin
          atr_sector_size_qnice_o  => atr_sector_size,
          atr_sector_count_qnice_o => atr_sector_count,
 
-         sd_lba_o       => sd_lba,
-         sd_blk_cnt_o   => sd_blk_cnt,
-         sd_rd_o        => sd_rd,
-         sd_wr_o        => sd_wr,
+         sd_lba_o       => atr_sd_lba,
+         sd_blk_cnt_o   => atr_sd_blk_cnt,
+         sd_rd_o        => atr_sd_rd,
+         sd_wr_o        => atr_sd_wr,
          sd_ack_i       => sd_ack,
          sd_buff_addr_i => sd_buff_addr,
          sd_buff_dout_i => sd_buff_dout,
-         sd_buff_din_o  => sd_buff_din,
+         sd_buff_din_o  => atr_sd_buff_din,
          sd_buff_wr_i   => sd_buff_wr
       );
       
