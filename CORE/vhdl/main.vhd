@@ -689,19 +689,19 @@ begin
    );
       
       
-    -- ATR is the only owner of virtual drive 0.
-    sd_lba(0)      <= atr_sd_lba(0);
-    sd_blk_cnt(0)  <= atr_sd_blk_cnt(0);
-    sd_rd(0)       <= atr_sd_rd(0);
-    sd_wr(0)       <= atr_sd_wr(0);
-    sd_buff_din(0) <= atr_sd_buff_din(0);
-
-    -- Drive 1: inactive for two-drive boot test
-    sd_lba(1)      <= (others => '0');
-    sd_blk_cnt(1)  <= (others => '0');
-    sd_rd(1)       <= '0';
-    sd_wr(1)       <= '0';
-    sd_buff_din(1) <= (others => '0');
+      -- ATR is the only owner of virtual drive 0.
+      sd_lba(0)      <= atr_sd_lba(0);
+      sd_blk_cnt(0)  <= atr_sd_blk_cnt(0);
+      sd_rd(0)       <= atr_sd_rd(0);
+      sd_wr(0)       <= atr_sd_wr(0);
+      sd_buff_din(0) <= atr_sd_buff_din(0);
+        
+       -- Drive 1: inactive for two-drive boot test
+      sd_lba(1)      <= cas_sd_lba;
+      sd_blk_cnt(1)  <= cas_sd_blk_cnt;
+      sd_rd(1)       <= cas_sd_rd;
+      sd_wr(1)       <= '0';
+      sd_buff_din(1) <= (others => '0');
 
    i_vdrives : entity work.vdrives
       generic map (
