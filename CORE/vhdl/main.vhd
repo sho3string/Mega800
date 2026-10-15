@@ -251,9 +251,7 @@ signal atr_meta_main         : std_logic_vector(40 downto 0);
 signal atr_valid_main        : std_logic;
 signal atr_sector_size_main  : unsigned(15 downto 0);
 signal atr_sector_count_main : unsigned(23 downto 0);
-signal atr_sector_service_ok : std_logic := '0';
-
-  
+signal atr_sector_service_ok : std_logic := '0'; 
 
 signal vdrives_mounted     : std_logic_vector(G_VDNUM - 1 downto 0);
 signal vdrive_mounted_d    : std_logic := '0';
@@ -294,6 +292,20 @@ signal atr_sd_blk_cnt  : vd_vec_array(G_VDNUM - 1 downto 0)(5 downto 0);
 signal atr_sd_rd       : vd_std_array(G_VDNUM - 1 downto 0);
 signal atr_sd_wr       : vd_std_array(G_VDNUM - 1 downto 0);
 signal atr_sd_buff_din : vd_vec_array(G_VDNUM - 1 downto 0)(7 downto 0);
+
+-- Atari CAS reader
+signal cas_sd_lba       : std_logic_vector(31 downto 0);
+signal cas_sd_blk_cnt   : std_logic_vector(5 downto 0);
+signal cas_sd_rd        : std_logic;
+
+signal cas_valid        : std_logic;
+signal cas_error        : std_logic;
+signal cas_position     : std_logic_vector(31 downto 0);
+signal cas_baud         : std_logic_vector(15 downto 0);
+signal cas_data_chunk   : std_logic;
+signal cas_chunk_length : std_logic_vector(15 downto 0);
+signal cas_chunk_silence: std_logic_vector(15 downto 0);
+
 
 signal pokeymax_config     : std_logic_vector(38 downto 0);
 
@@ -643,15 +655,48 @@ begin
          sio_drive_activity_o => sio_drive_activity
       );
       
-      
-   -- ATR is the only owner of virtual drive 0.
-   sd_lba(0)      <= atr_sd_lba(0);
-   sd_blk_cnt(0)  <= atr_sd_blk_cnt(0);
-   sd_rd(0)       <= atr_sd_rd(0);
-   sd_wr(0)       <= atr_sd_wr(0);
-   sd_buff_din(0) <= atr_sd_buff_din(0);
+    i_atari_cas : entity work.atari_cas
+   port map (
+      qnice_clk_i         => atari_qnice_clk_i,
 
-   -- Drive 1: inactive for two-drive boot test
+      -- Keep the reader disabled for this first compilation test.
+      reset_i             => '1',
+
+      cas_change_toggle_i => '0',
+      cas_mounted_i       => '0',
+      cas_size_i          => (others => '0'),
+
+      sd_lba_o            => cas_sd_lba,
+      sd_blk_cnt_o        => cas_sd_blk_cnt,
+      sd_rd_o             => cas_sd_rd,
+
+      sd_ack_i            => sd_ack(1),
+
+      sd_buff_addr_i      => sd_buff_addr,
+      sd_buff_dout_i      => sd_buff_dout,
+      sd_buff_wr_i        => sd_buff_wr,
+
+      -- No cassette transfers enabled yet.
+      sd_buff_cas_i       => '0',
+
+      cas_valid_o         => cas_valid,
+      cas_error_o         => cas_error,
+      cas_position_o      => cas_position,
+      cas_baud_o          => cas_baud,
+      cas_data_chunk_o    => cas_data_chunk,
+      cas_chunk_length_o  => cas_chunk_length,
+      cas_chunk_silence_o => cas_chunk_silence
+   );
+      
+      
+    -- ATR is the only owner of virtual drive 0.
+    sd_lba(0)      <= atr_sd_lba(0);
+    sd_blk_cnt(0)  <= atr_sd_blk_cnt(0);
+    sd_rd(0)       <= atr_sd_rd(0);
+    sd_wr(0)       <= atr_sd_wr(0);
+    sd_buff_din(0) <= atr_sd_buff_din(0);
+
+    -- Drive 1: inactive for two-drive boot test
     sd_lba(1)      <= (others => '0');
     sd_blk_cnt(1)  <= (others => '0');
     sd_rd(1)       <= '0';
