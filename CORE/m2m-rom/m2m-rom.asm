@@ -90,12 +90,16 @@ FILTER_FILES    INCRB
                 RBRA    _FFILES_RET_0, Z
 
                 ; ------------------------------------------------
-                ; Disk image browser: only .ATR
+                ; Disk image browser: .ATR and .CAS
                 ; ------------------------------------------------
                 CMP     CTX_MOUNT_DISKIMG, R10
                 RBRA    _FFILES_LOADROM, !Z
 
                 MOVE    ATARI_ATRFILE, R9
+                RSUB    M2M$CHK_EXT, 1
+                RBRA    _FFILES_RET_0, C
+
+                MOVE    ATARI_CASFILE, R9
                 RSUB    M2M$CHK_EXT, 1
                 RBRA    _FFILES_RET_0, C
 
@@ -268,6 +272,7 @@ ATARI_XEXFILE     .ASCII_W ".XEX"
 ATARI_ATRFILE     .ASCII_W ".ATR"
 ATARI_ACTFILE   	.ASCII_W ".ACT"
 ATARI_ROMFILE   	.ASCII_W ".ROM"
+ATARI_CASFILE     .ASCII_W ".CAS"
 
 ; This needs to be the last thing before the "Variables" sections starts
 END_OF_ROM      .DW 0

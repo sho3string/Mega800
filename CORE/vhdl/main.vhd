@@ -306,6 +306,16 @@ signal cas_data_chunk   : std_logic;
 signal cas_chunk_length : std_logic_vector(15 downto 0);
 signal cas_chunk_silence: std_logic_vector(15 downto 0);
 
+-- Capture drive 1 mount metadata in the main clock domain.
+signal cas_mount_d_main     : std_logic := '0';
+signal cas_event_pending    : std_logic := '0';
+signal cas_change_main      : std_logic := '0';
+signal cas_size_main        : std_logic_vector(31 downto 0) := (others => '0');
+signal cas_mounted_main     : std_logic := '0';
+signal cas_meta_main        : std_logic_vector(33 downto 0);
+signal cas_meta_qnice       : std_logic_vector(33 downto 0);
+signal cas_change_delay     : std_logic_vector(3 downto 0) := (others => '0');
+
 
 signal pokeymax_config     : std_logic_vector(38 downto 0);
 
@@ -655,16 +665,56 @@ begin
          sio_drive_activity_o => sio_drive_activity
       );
       
+    -- vdrives supplies one shared img_size, valid during the mount strobe.
+    -- Latch it for drive 1 and publish the change token one main clock later.
+    cas_mount_capture : process(clk_main_i)
+    begin
+       if rising_edge(clk_main_i) then
+          cas_mount_d_main <= img_mounted(1);
+          cas_event_pending <= '0';
+          if cas_event_pending = '1' then
+             cas_change_main <= not cas_change_main;
+          end if;
+          if img_mounted(1) = '1' and cas_mount_d_main = '0' then
+             cas_size_main <= img_size;
+             if img_size = x"00000000" then
+                cas_mounted_main <= '0';
+             else
+                cas_mounted_main <= '1';
+             end if;
+             cas_event_pending <= '1';
+          end if;
+       end if;
+    end process;
+
+    cas_meta_main <= cas_change_main & cas_mounted_main & cas_size_main;
+
+    i_cas_meta_cdc : xpm_cdc_array_single
+       generic map ( WIDTH => 34 )
+       port map (
+          src_clk  => clk_main_i,
+          src_in   => cas_meta_main,
+          dest_clk => atari_qnice_clk_i,
+          dest_out => cas_meta_qnice
+       );
+
+    -- Give synchronized size/mount fields time to settle before the event.
+    cas_event_delay_proc : process(atari_qnice_clk_i)
+    begin
+       if rising_edge(atari_qnice_clk_i) then
+          cas_change_delay <= cas_change_delay(2 downto 0) & cas_meta_qnice(33);
+       end if;
+    end process;
+
     i_atari_cas : entity work.atari_cas
    port map (
       qnice_clk_i         => atari_qnice_clk_i,
 
-      -- Keep the reader disabled for this first compilation test.
-      reset_i             => '1',
+      reset_i             => '0',
 
-      cas_change_toggle_i => '0',
-      cas_mounted_i       => '0',
-      cas_size_i          => (others => '0'),
+      cas_change_toggle_i => cas_change_delay(3),
+      cas_mounted_i       => cas_meta_qnice(32),
+      cas_size_i          => cas_meta_qnice(31 downto 0),
 
       sd_lba_o            => cas_sd_lba,
       sd_blk_cnt_o        => cas_sd_blk_cnt,
@@ -676,8 +726,7 @@ begin
       sd_buff_dout_i      => sd_buff_dout,
       sd_buff_wr_i        => sd_buff_wr,
 
-      -- No cassette transfers enabled yet.
-      sd_buff_cas_i       => '0',
+      sd_buff_cas_i       => sd_ack(1),
 
       cas_valid_o         => cas_valid,
       cas_error_o         => cas_error,
@@ -696,7 +745,7 @@ begin
       sd_wr(0)       <= atr_sd_wr(0);
       sd_buff_din(0) <= atr_sd_buff_din(0);
         
-       -- Drive 1: inactive for two-drive boot test
+       -- Drive 1: CAS reader
       sd_lba(1)      <= cas_sd_lba;
       sd_blk_cnt(1)  <= cas_sd_blk_cnt;
       sd_rd(1)       <= cas_sd_rd;
@@ -750,9 +799,9 @@ begin
          qnice_we_i        => atari_qnice_we_i
    ); -- i_vdrives
    
-----------------------------------------------------------------------------
--- ATR geometry -> main clock
-----------------------------------------------------------------------------
+    ----------------------------------------------------------------------------
+    -- ATR geometry -> main clock
+    ----------------------------------------------------------------------------
 
     atr_meta_qnice <=
        std_logic_vector(atr_sector_count) &
