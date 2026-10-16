@@ -6,36 +6,6 @@
 -- MiSTer2MEGA65 done by sy2002 and MJoergen in 2022 and licensed under GPL v3
 ----------------------------------------------------------------------------------
 
-/*
-
- Atari memory system
-                 ┌──────────────────────┐
-                 │                      │
-       CPU ─────►│                      │
-     ANTIC ─────►│   mapper / arbiter   │
-      VBXE ─────►│                      │
-      Cart ─────►│                      │
-                 └──────────┬───────────┘
-                            │
-                      Atari memory
-                         contract
-                            │
-                 ┌──────────▼───────────┐
-                 │ SDRAM compatibility  │
-                 │ / HyperRAM adapter   │
-                 │                      │
-                 │ BRAM cache/buffer    │
-                 │ request scheduling   │
-                 │ burst reads          │
-                 │ write buffering      │
-                 │ CDC                  │
-                 └──────────┬───────────┘
-                            │
-                    M2M HyperRAM API
-                            │
-                         8 MB
-
-*/
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -315,6 +285,21 @@ signal cas_mounted_main     : std_logic := '0';
 signal cas_meta_main        : std_logic_vector(33 downto 0);
 signal cas_meta_qnice       : std_logic_vector(33 downto 0);
 signal cas_change_delay     : std_logic_vector(3 downto 0) := (others => '0');
+-- CAS FIFO bridge: QNICE producer -> main-clock Atari tape FIFO.
+signal cas_tape_word_qnice : std_logic_vector(31 downto 0);
+signal cas_tape_request_qnice : std_logic;
+signal cas_tape_request_main : std_logic_vector(3 downto 0) := (others => '0');
+signal cas_tape_word_main : std_logic_vector(31 downto 0);
+signal cas_tape_ack_main : std_logic := '0';
+signal cas_tape_ack_qnice : std_logic_vector(0 downto 0);
+signal cas_tape_ack_bus : std_logic_vector(0 downto 0);
+signal cas_tape_request_bus : std_logic_vector(0 downto 0);
+signal cas_tape_request_sync : std_logic_vector(0 downto 0);
+signal cas_tape_data : std_logic_vector(31 downto 0) := (others => '0');
+signal cas_tape_wr : std_logic := '0';
+signal cas_tape_reset : std_logic := '0';
+signal cas_tape_change_main : std_logic := '0';
+
 
 
 signal pokeymax_config     : std_logic_vector(38 downto 0);
@@ -533,13 +518,13 @@ begin
       UART_DATA_WRITE         => sio_uart_data_write,
       UART_DATA_READ          => uart_data_read,
 
-      TAPE_DATA               => (others => '0'),
-      TAPE_DATA_WR            => '0',
+      TAPE_DATA               => cas_tape_data,
+      TAPE_DATA_WR            => cas_tape_wr,
       TAPE_FIFO_FULL          => tape_fifo_full,
       TAPE_FIFO_EMPTY         => tape_fifo_empty,
       TAPE_PWM_CONFIG         => "000",
       TAPE_PWM_INVERT         => '0',
-      TAPE_RESET              => '0',
+      TAPE_RESET              => cas_tape_reset,
       TAPE_ACTIVE             => tape_active,
 
       HPS_DMA_ADDR            => atari_dma_addr_mux,
@@ -734,7 +719,10 @@ begin
       cas_baud_o          => cas_baud,
       cas_data_chunk_o    => cas_data_chunk,
       cas_chunk_length_o  => cas_chunk_length,
-      cas_chunk_silence_o => cas_chunk_silence
+      cas_chunk_silence_o => cas_chunk_silence,
+      tape_word_o         => cas_tape_word_qnice,
+      tape_request_toggle_o => cas_tape_request_qnice,
+      tape_ack_toggle_i   => cas_tape_ack_qnice(0)
    );
       
       
@@ -745,7 +733,55 @@ begin
       sd_wr(0)       <= atr_sd_wr(0);
       sd_buff_din(0) <= atr_sd_buff_din(0);
         
-       -- Drive 1: CAS reader
+       -- Cross the stable CAS FIFO word and request toggle to the main domain.
+    i_cas_tape_word_cdc : xpm_cdc_array_single
+       generic map ( WIDTH => 32 )
+       port map (
+          src_clk  => atari_qnice_clk_i,
+          src_in   => cas_tape_word_qnice,
+          dest_clk => clk_main_i,
+          dest_out => cas_tape_word_main
+       );
+
+    cas_tape_ack_bus(0) <= cas_tape_ack_main;
+    cas_tape_request_bus(0) <= cas_tape_request_qnice;
+
+    i_cas_tape_request_cdc : xpm_cdc_array_single
+       generic map ( WIDTH => 1 )
+       port map (
+          src_clk  => atari_qnice_clk_i,
+          src_in   => cas_tape_request_bus,
+          dest_clk => clk_main_i,
+          dest_out => cas_tape_request_sync
+       );
+
+    i_cas_tape_ack_cdc : xpm_cdc_array_single
+       generic map ( WIDTH => 1 )
+       port map (
+          src_clk  => clk_main_i,
+          src_in   => cas_tape_ack_bus,
+          dest_clk => atari_qnice_clk_i,
+          dest_out => cas_tape_ack_qnice
+       );
+
+    cas_tape_fifo_bridge : process(clk_main_i)
+    begin
+       if rising_edge(clk_main_i) then
+          cas_tape_request_main <= cas_tape_request_main(2 downto 0) & cas_tape_request_sync(0);
+          cas_tape_wr <= '0';
+          cas_tape_reset <= '0';
+          if cas_change_main /= cas_tape_change_main then
+             cas_tape_change_main <= cas_change_main;
+             cas_tape_reset <= '1';
+          elsif cas_tape_request_main(3) /= cas_tape_ack_main and tape_fifo_full = '0' then
+             cas_tape_data <= cas_tape_word_main;
+             cas_tape_wr <= '1';
+             cas_tape_ack_main <= cas_tape_request_main(3);
+          end if;
+       end if;
+    end process;
+
+    -- Drive 1: CAS reader
       sd_lba(1)      <= cas_sd_lba;
       sd_blk_cnt(1)  <= cas_sd_blk_cnt;
       sd_rd(1)       <= cas_sd_rd;
@@ -799,9 +835,9 @@ begin
          qnice_we_i        => atari_qnice_we_i
    ); -- i_vdrives
    
-    ----------------------------------------------------------------------------
-    -- ATR geometry -> main clock
-    ----------------------------------------------------------------------------
+----------------------------------------------------------------------------
+-- ATR geometry -> main clock
+----------------------------------------------------------------------------
 
     atr_meta_qnice <=
        std_logic_vector(atr_sector_count) &
