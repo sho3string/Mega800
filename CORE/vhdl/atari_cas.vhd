@@ -265,7 +265,7 @@ begin
                   elsif serial_index <= 8 then level := serial_byte(serial_index - 1);
                   else level := '1'; end if;
                   entry_word <= duration_word(bit_ticks,level);
-                  if serial_index = 10 then
+                  if serial_index = 9 then
                      after_queue <= data_chunk;
                   else
                      serial_index <= serial_index + 1;

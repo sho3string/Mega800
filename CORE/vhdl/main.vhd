@@ -692,7 +692,10 @@ begin
     end process;
 
     i_atari_cas : entity work.atari_cas
-   port map (
+       generic map (
+          TAPE_CLOCK_HZ => 28636364
+       )
+    port map (
       qnice_clk_i         => atari_qnice_clk_i,
 
       reset_i             => '0',
