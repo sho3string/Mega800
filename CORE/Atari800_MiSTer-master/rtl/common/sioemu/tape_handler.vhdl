@@ -54,8 +54,16 @@ signal pwm_bit : std_logic;
 signal fsk_bit : std_logic;
 signal fsk_act : std_logic;
 signal pwm_act : std_logic;
+signal tape_freeze : std_logic;
 
 begin
+
+-- Stop the virtual tape transport when its selected motor is off.
+-- Allow the initial FIFO activation marker to be consumed first.
+tape_freeze <= '1' when active_reg = '1' and
+                   ((pwm_out_reg = '0' and fsk_motor = '0') or
+                    (pwm_out_reg = '1' and pwm_motor = '0'))
+               else '0';
 
 tape_transmit_fifo : entity work.fifo_tape
 PORT MAP (clock => clk,data=>data_in(31 downto 0),rdreq=>fifo_req,wrreq=>wr_en,empty=>fifo_queue_empty,full=>fifo_full,q=>fifo_data,aclr=>fifo_reset);
@@ -75,7 +83,7 @@ begin
 	end if;
 end process;
 
-process(count_reg, pwm_out_reg, pins_out_reg, active_reg, fifo_req, fifo_data, fifo_queue_empty, fifo_reset)
+process(count_reg, pwm_out_reg, pins_out_reg, active_reg, fifo_req, fifo_data, fifo_queue_empty, fifo_reset, tape_freeze)
 begin
 
 	fifo_req <= '0';
@@ -89,6 +97,8 @@ begin
 		pwm_out_next <= '0';
 		active_next <= '0';
 		pins_out_next <= "01";
+	elsif tape_freeze = '1' then
+		null; -- Hold tape duration, output state, and FIFO read pointer.
 	else
 		if or_reduce(std_logic_vector(count_reg)) = '0' then
 			if fifo_queue_empty = '0' then
