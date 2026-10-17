@@ -111,6 +111,7 @@ entity main is
       atr_sector_count_512_o  : out std_logic;
       atr_sector_count_1040_o : out std_logic;
       atr_sector4_ok_o        : out std_logic;
+      cas_activity_o          : out std_logic;
       
       atari_vbxe_palette_addr_o : out std_logic_vector(9 downto 0);
       atari_vbxe_palette_data_i : in  std_logic_vector(7 downto 0);
@@ -299,8 +300,6 @@ signal cas_tape_data : std_logic_vector(31 downto 0) := (others => '0');
 signal cas_tape_wr : std_logic := '0';
 signal cas_tape_reset : std_logic := '0';
 signal cas_tape_change_main : std_logic := '0';
-
-
 
 signal pokeymax_config     : std_logic_vector(38 downto 0);
 
@@ -672,7 +671,8 @@ begin
        end if;
     end process;
 
-    cas_meta_main <= cas_change_main & cas_mounted_main & cas_size_main;
+    cas_meta_main  <= cas_change_main & cas_mounted_main & cas_size_main;
+    cas_activity_o <= tape_active;
 
     i_cas_meta_cdc : xpm_cdc_array_single
        generic map ( WIDTH => 34 )
@@ -690,7 +690,8 @@ begin
           cas_change_delay <= cas_change_delay(2 downto 0) & cas_meta_qnice(33);
        end if;
     end process;
-
+    
+    
     i_atari_cas : entity work.atari_cas
        generic map (
           TAPE_CLOCK_HZ => 28636364

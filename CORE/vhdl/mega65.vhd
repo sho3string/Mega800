@@ -380,6 +380,7 @@ signal atr_sector_count_ok_main   : std_logic;
 signal atr_sector_count_512_main  : std_logic;
 signal atr_sector_count_1040_main : std_logic;
 signal atr_sector4_ok_main        : std_logic;
+signal cas_activity_main          : std_logic;
 
 begin
 
@@ -487,6 +488,7 @@ begin
    main_reset_core_i or
    rom_loaded_reset or
    machine_mode_reset;
+ 
    
    -- main.vhd contains the actual MiSTer core
    i_main : entity work.main
@@ -581,6 +583,7 @@ begin
          atr_sector_count_512_o => atr_sector_count_512_main,
          atr_sector_count_1040_o=> atr_sector_count_1040_main,
          atr_sector4_ok_o       => atr_sector4_ok_main,
+         cas_activity_o         => cas_activity_main,
          
          osm_control_i        => main_osm_control_i,
          rtc_i                => main_rtc_i
@@ -1188,7 +1191,7 @@ begin
    --main_drive_led_o     <= '0';
    --main_drive_led_col_o <= x"00FF00";  -- 24-bit RGB value for the led
    
-   main_drive_led_o <= atr_sector4_ok_main;
+   main_drive_led_o <= atr_sector4_ok_main or cas_activity_main;
    main_drive_led_col_o <= x"FF0000";
   
 end architecture synthesis;
