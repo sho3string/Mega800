@@ -330,8 +330,7 @@ begin
                         -- presses F11 with a valid ATR mounted.
                         if manual_cold_boot_i = '1' and
                            manual_cold_boot_d = '0' and
-                           dma_req_i = '0' and
-                           atr_valid_main_i = '1' then
+                           dma_req_i = '0' then
                     
                             atr_boot_dma_addr   <= (others => '0');
                             atr_boot_dma_active <= '1';
