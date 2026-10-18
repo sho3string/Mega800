@@ -1,4 +1,4 @@
-# Atari 800/XL/XE Core for MEGA65 — Alpha V1 Release
+# Atari 800/XL/XE Core for MEGA65 — Alpha V2 Release
 
 This is an **Alpha release** of the Atari 8-bit computer core for the MEGA65.  
 The core is based on the MiSTer Atari800 implementation and has been adapted to run within the MiSTer2MEGA65 framework.  
@@ -20,23 +20,24 @@ MiSTer Atari 800 Core - woj76,sorgelig,claude & carlosbravoa
 
 ## Current Features
 
-This Alpha currently supports:
+Alpha V2 currently supports:
 
 - Atari **XL/XE** machine mode
 - Atari **400/800** machine mode
-- **PAL and NTSC**
-- **ATR disk images**
-- **XEX executable loading**
+- PAL and NTSC
+- ATR disk images
+- **CAS cassette images**
+- XEX executable loading
 - MEGA65 joystick support
 - Atari / MEGA65 keyboard mapping modes
 - Configurable Atari RAM ( 8K/64K, 16K/128K, 32K/320K Compy, 48K/320K Rambo )
 - Clip sides
 - 15Khz or 31Khz analog video out support
-- Clip sides ( see description below )
 - RTC support
 - VBXE options
 - Cold and warm reset controls
 - OPTION-assisted cold boot for software requiring BASIC to be disabled
+- Cassette activity LED indication
 
 **Cartridge images are not supported in this release.**
 **PBI is also not supported in this version.**  
@@ -45,12 +46,15 @@ This Alpha currently supports:
 
 # The OSD Menu
 
-The OSD provides access to disk and executable loading, video output, Atari machine configuration, memory expansion, VBXE, keyboard mapping and other core settings.
+The OSD provides access to disk, cassette and executable loading, video output, Atari machine configuration, memory expansion, VBXE, keyboard mapping and other core settings.
 
 ## Main Menu
 
 - **Drive A**  
   Mounts an `.atr` disk image as Atari drive **D1:**.
+
+- **CAS cassette loading**  
+  Mounts an `.cas` cassette image for playback through the emulated Atari cassette interface.
 
 - **Load XEX**  
   Loads an Atari `.xex` executable directly into the emulated Atari.  
@@ -417,6 +421,27 @@ The XL/XE has built-in BASIC which must be disabled with OPTION. The 400/800 doe
 
 ---
 
+# CAS Cassette Images (New in Alpha V2)
+
+Alpha V2 introduces Atari cassette image support using `.cas` files.
+
+The CAS reader parses the cassette image and supplies timed tape data to the emulated cassette interface. Playback is controlled by the Atari's cassette motor signal rather than simply advancing continuously after a file is mounted.
+
+## Loading a cassette
+
+1. Mount a `.cas` image using the core's cassette file selection in the OSD.
+2. Select the appropriate Atari machine mode and RAM configuration for the software.
+3. Start the software's normal cassette-loading procedure. Some programs require a cold boot with START or OPTION held, depending on the title and Atari model.
+4. Allow the cassette to load; the cassette activity LED provides an indication of tape activity.
+
+## Cassette transport behaviour
+
+The virtual cassette transport pauses while the selected cassette motor is off. Tape playback resumes when the motor is enabled, preserving the position rather than consuming tape data while stopped. This addresses a transport issue observed during Gauntlet testing.
+
+Cassette loading has been tested with Gauntlet, including playing through several levels. This is not a guarantee of compatibility with every CAS image, especially non-standard or turbo loaders.
+
+---
+
 # XEX Executable Files
 
 XEX executable loading is supported in **Atari XL/XE mode**.
@@ -672,7 +697,7 @@ This has been observed with some titles and remains an area for further work.
 
 ### Compatibility
 
-The Atari software library is enormous and this Alpha has not been exhaustively tested.
+The Atari software library is enormous and this Alpha has not been exhaustively tested. CAS compatibility, particularly with unusual tape formats and turbo loaders, remains an area for further testing.
 
 Working on MiSTer does not automatically guarantee identical behaviour on the MEGA65 port, so compatibility reports are useful.
 
@@ -689,6 +714,7 @@ Testing is particularly useful in the following areas:
 - BASIC programs
 - disk games requiring BASIC to be disabled
 - software performing additional disk accesses after boot
+- CAS cassette loading and motor start/stop behaviour
 - XEX files
 - compressed XEX files
 - XEX files containing INIT routines
@@ -707,7 +733,7 @@ Testing is particularly useful in the following areas:
 When reporting a compatibility issue, please include as much of the following as possible:
 
 - **Title/software name**
-- **File type:** ATR or XEX
+- **File type:** ATR, CAS or XEX
 - **Machine mode:** XL/XE or 400/800
 - **Video mode:** PAL or NTSC
 - **RAM configuration**
@@ -727,7 +753,7 @@ For XEX problems, also mention whether the file contains an intro/cracktro or ap
 
 The main focus of this Alpha is getting the fundamental Atari 8-bit experience working reliably on the MEGA65:
 
-**XL/XE and 400/800 machine operation, ATR disk access, XEX loading, keyboard and joystick input, PAL/NTSC operation, and the associated boot/reset behaviour.**
+**XL/XE and 400/800 machine operation, ATR disk access, CAS cassette loading, XEX loading, keyboard and joystick input, PAL/NTSC operation, and the associated boot/reset behaviour.**
 
 ATR support includes continued disk access after the initial boot rather than merely loading the initial disk contents.
 
