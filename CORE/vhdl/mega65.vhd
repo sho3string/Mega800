@@ -299,14 +299,11 @@ signal vbxe_palette_reload_main : std_logic := '0';
 signal vbxe_palette_written_qnice     : std_logic := '0';
 signal vbxe_palette_csr_written_qnice : std_logic := '0';
 
--- D1 mounted ATR image buffer: 256 KiB
-signal qnice_d1buf_we          : std_logic;
-signal qnice_d1buf_addr        : std_logic_vector(17 downto 0);
-signal qnice_d1buf_data_from   : std_logic_vector(7 downto 0);
-
-signal qnice_casbuf_we         : std_logic;
-signal qnice_casbuf_addr       : std_logic_vector(17 downto 0);
-signal qnice_casbuf_data_from  : std_logic_vector(7 downto 0);
+-- D1 (ATR) and CAS mount buffers, now in HyperRAM (512 KiB each)
+signal qnice_hrbuf_cs          : std_logic;
+signal qnice_hrbuf_region      : std_logic;   -- '0' = D1, '1' = CAS
+signal qnice_hrbuf_data_from   : std_logic_vector(7 downto 0);
+signal qnice_hrbuf_wait        : std_logic;
 
 signal main_osrom_addr         : std_logic_vector(13 downto 0);
 signal main_osrom_data         : std_logic_vector(7 downto 0);
@@ -386,12 +383,7 @@ begin
 
    qnice_hdmi_view_size_o <= (others => '0');
 
-   hr_core_write_o      <= '0';
-   hr_core_read_o       <= '0';
-   hr_core_address_o    <= (others => '0');
-   hr_core_writedata_o  <= (others => '0');
-   hr_core_byteenable_o <= (others => '0');
-   hr_core_burstcount_o <= (others => '0');
+   -- hr_core_* is driven by i_hrbuf (mount buffers in HyperRAM), see below.
 
    -- Tristate all expansion port drivers that we can directly control
    -- @TODO: As soon as we support modules that can act as busmaster, we need to become more flexible here
@@ -794,8 +786,8 @@ begin
        qnice_vbxe_palette_addr     <= qnice_dev_addr_i(9 downto 0);
        qnice_vbxe_palette_data_to  <= qnice_dev_data_i(7 downto 0);
        
-       qnice_d1buf_we         <= '0';
-       qnice_d1buf_addr       <= qnice_dev_addr_i(17 downto 0);
+       qnice_hrbuf_cs         <= '0';
+       qnice_hrbuf_region     <= '0';
        
        qnice_xex_ce           <= '0';
        qnice_xex_we           <= '0';
@@ -840,10 +832,18 @@ begin
                qnice_vbxe_palette_data_to <= qnice_dev_data_i(7 downto 0);
                
               
+           -- Mount buffers live in HyperRAM. CSR window accesses are ignored.
            when C_DEV_ATARI_D1_BUFFER =>
-               qnice_d1buf_addr <= qnice_dev_addr_i(17 downto 0);
-               qnice_d1buf_we   <= qnice_dev_we_i;
-               qnice_dev_data_o <= x"00" & qnice_d1buf_data_from;
+               qnice_hrbuf_cs     <= qnice_dev_ce_i and not qnice_csr_window;
+               qnice_hrbuf_region <= '0';
+               qnice_dev_data_o   <= x"00" & qnice_hrbuf_data_from;
+               qnice_dev_wait_o   <= qnice_hrbuf_wait;
+
+           when C_DEV_ATARI_CAS_BUFFER =>
+               qnice_hrbuf_cs     <= qnice_dev_ce_i and not qnice_csr_window;
+               qnice_hrbuf_region <= '1';
+               qnice_dev_data_o   <= x"00" & qnice_hrbuf_data_from;
+               qnice_dev_wait_o   <= qnice_hrbuf_wait;
 
            when C_VD_DEVICE =>
                qnice_atari_ce   <= qnice_dev_ce_i;
@@ -1106,36 +1106,41 @@ begin
    );
    
 ---------------------------------------------------------------------------------------------
--- D1 mounted ATR image buffer
+-- D1 (ATR) and CAS mount buffers in HyperRAM
 --
--- QNICE/M2M loads the complete mounted disk image here.
--- vdrives subsequently services block requests from this image buffer.
--- 18 address bits = 256 KiB.
+-- QNICE/M2M loads the complete mounted image into the buffer device; vdrives
+-- then services block requests from it. Previously a 256 KiB BRAM shared by
+-- vdrive 0 and 1 (64 RAMB36 tiles). Now two separate 512 KiB HyperRAM regions.
 ---------------------------------------------------------------------------------------------
 
-   d1_mount_buf_ram : entity work.dualport_2clk_ram
-       generic map (
-          ADDR_WIDTH => 18,
-          DATA_WIDTH => 8,
-          FALLING_A  => true,
-          FALLING_B  => false
-       )
-       port map (
-          -- QNICE side
-          clock_a    => qnice_clk_i,
-          address_a  => qnice_d1buf_addr,
-          data_a     => qnice_dev_data_i(7 downto 0),
-          wren_a     => qnice_d1buf_we,
-          q_a        => qnice_d1buf_data_from,
-    
-          -- No direct Atari-side access.
-          -- vdrives receives requested blocks through its own buffer interface.
-          clock_b    => main_clk,
-          address_b  => (others => '0'),
-          data_b     => (others => '0'),
-          wren_b     => '0',
-          q_b        => open
-    );
+   i_hrbuf : entity work.qnice_hyperram_buf
+      generic map (
+         G_D1_BASE  => 16#780000#,
+         G_CAS_BASE => 16#700000#
+      )
+      port map (
+         qnice_clk_i        => qnice_clk_i,
+         qnice_rst_i        => qnice_rst_i,
+         qnice_cs_i         => qnice_hrbuf_cs,
+         qnice_region_i     => qnice_hrbuf_region,
+         qnice_we_i         => qnice_dev_we_i,
+         qnice_addr_i       => qnice_dev_addr_i(18 downto 0),
+         qnice_data_i       => qnice_dev_data_i(7 downto 0),
+         qnice_data_o       => qnice_hrbuf_data_from,
+         qnice_wait_o       => qnice_hrbuf_wait,
+
+         hr_clk_i           => hr_clk_i,
+         hr_rst_i           => hr_rst_i,
+         hr_write_o         => hr_core_write_o,
+         hr_read_o          => hr_core_read_o,
+         hr_address_o       => hr_core_address_o,
+         hr_writedata_o     => hr_core_writedata_o,
+         hr_byteenable_o    => hr_core_byteenable_o,
+         hr_burstcount_o    => hr_core_burstcount_o,
+         hr_readdata_i      => hr_core_readdata_i,
+         hr_readdatavalid_i => hr_core_readdatavalid_i,
+         hr_waitrequest_i   => hr_core_waitrequest_i
+      );
    
    i_xex_loader : entity work.xex_loader
    port map (

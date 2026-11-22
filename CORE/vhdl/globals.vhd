@@ -161,8 +161,8 @@ type vd_buf_array is array(natural range <>) of std_logic_vector;
 constant C_VDNUM              : natural := 2;                                          -- amount of virtual drives; maximum is 15
 constant C_VD_DEVICE          : std_logic_vector(15 downto 0) := C_DEV_DEMO_VD;        -- device number of vdrives.vhd device
 constant C_VD_BUFFER          : vd_buf_array := (
-   C_DEV_ATARI_D1_BUFFER,
-   C_DEV_ATARI_D1_BUFFER,
+   C_DEV_ATARI_D1_BUFFER,    -- vdrive 0: ATR (D1)
+   C_DEV_ATARI_CAS_BUFFER,   -- vdrive 1: CAS (own HyperRAM region)
    x"EEEE"
 );
 
