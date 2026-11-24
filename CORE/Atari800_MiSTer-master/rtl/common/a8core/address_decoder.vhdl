@@ -226,15 +226,26 @@ ARCHITECTURE vhdl OF address_decoder IS
 	signal axlon_bank_next : std_logic_vector(7 downto 0);
 	
 	-- even though we have 3 targets (flash, ram, rom) and 3 masters, only allow access to one a a time - simpler.
-	signal state_next : std_logic_vector(2 downto 0);
-	signal state_reg : std_logic_vector(2 downto 0);
-	constant state_idle : std_logic_vector(2 downto 0) := "000";
-	constant state_waiting_cpu : std_logic_vector(2 downto 0) := "001";
-	constant state_waiting_DMA : std_logic_vector(2 downto 0) := "010";
-	constant state_waiting_antic : std_logic_vector(2 downto 0) := "011";
-	constant state_waiting_flash : std_logic_vector(2 downto 0) := "100";
-	constant state_waiting_sample : std_logic_vector(2 downto 0) := "101";
-	constant state_waiting_sid: std_logic_vector(2 downto 0) := "110";
+	signal state_next : std_logic_vector(3 downto 0);
+	signal state_reg : std_logic_vector(3 downto 0);
+	constant state_idle : std_logic_vector(3 downto 0) := "0000";
+	constant state_waiting_cpu : std_logic_vector(3 downto 0) := "0001";
+	constant state_waiting_DMA : std_logic_vector(3 downto 0) := "0010";
+	constant state_waiting_antic : std_logic_vector(3 downto 0) := "0011";
+	constant state_waiting_flash : std_logic_vector(3 downto 0) := "0100";
+	constant state_waiting_sample : std_logic_vector(3 downto 0) := "0101";
+	constant state_waiting_sid: std_logic_vector(3 downto 0) := "0110";
+	-- Mega800: ANTIC overtakes a CPU access that is waiting on the SDRAM port (HyperRAM)
+	constant state_ovt_antic : std_logic_vector(3 downto 0) := "0111";
+	constant state_ovt_restore : std_logic_vector(3 downto 0) := "1000";
+
+	-- Mega800: ANTIC overtake support
+	signal cpu_sdram_reg : std_logic := '0';                           -- current CPU access went to the SDRAM port
+	signal ovt_addr_reg : std_logic_vector(25 downto 0) := (others=>'0'); -- saved CPU access
+	signal ovt_data_reg : std_logic_vector(31 downto 0) := (others=>'0');
+	signal ovt_we_reg : std_logic := '0';
+	signal ovt_we_freezer_reg : std_logic := '0';
+	signal antic_overtake_ok : std_logic;                              -- ANTIC's fetch can not go to the SDRAM port
 	
 	signal ram_chip_select : std_logic;
 	signal sdram_chip_select : std_logic;
@@ -405,6 +416,49 @@ BEGIN
 			bank1reg <= bank1next;
 			basic_reg <= basic_next;
 
+		end if;
+	end process;
+
+	-- Mega800: ANTIC overtake bookkeeping
+	process(clk)
+	begin
+		if rising_edge(clk) then
+			-- remember whether the CPU access we are waiting for went to the SDRAM port
+			if (state_reg = state_idle and state_next = state_waiting_cpu) then
+				cpu_sdram_reg <= sdram_chip_select;
+			end if;
+			-- save the CPU access while ANTIC overtakes it
+			if (state_reg = state_waiting_cpu and state_next = state_ovt_antic) then
+				ovt_addr_reg <= addr_reg;
+				ovt_data_reg <= data_write_reg;
+				ovt_we_reg <= write_enable_reg;
+				ovt_we_freezer_reg <= write_enable_freezer_reg;
+			end if;
+		end if;
+	end process;
+
+	-- Mega800: can ANTIC's fetch go to the SDRAM port? (conservative; from inputs only,
+	-- so there is no combinational loop through addr_next)
+	process(antic_addr,atari800mode,ram_select,portb,emu_cart_enable)
+		variable ext : std_logic;
+	begin
+		ext := '0';
+		if (atari800mode = '1') then
+			if (ram_select = "101") then ext := '1'; end if;          -- Axlon
+		else
+			case ram_select is
+				when "001" | "010" | "100" => ext := not(portb(5));   -- 130XE / Compy: ANTIC bit
+				when "011" | "101" | "110" => ext := not(portb(4));   -- Rambo: shared
+				when "111"                 => ext := '1';             -- Axlon
+				when others                => ext := '0';
+			end case;
+		end if;
+		antic_overtake_ok <= '1';
+		if (antic_addr(15 downto 14) = "01" and ext = '1') then       -- $4000-$7FFF banked
+			antic_overtake_ok <= '0';
+		end if;
+		if (antic_addr(15 downto 14) = "10" and emu_cart_enable = '1') then  -- $8000-$BFFF cart
+			antic_overtake_ok <= '0';
 		end if;
 	end process;
 
@@ -676,7 +730,8 @@ BEGIN
 	process(antic_fetch, dma_fetch, cpu_fetch, atari_dma_access, state_reg, addr_reg, data_write_reg, width_8bit_reg, width_16bit_reg, width_32bit_reg, write_enable_reg, write_enable_freezer_reg, antic_addr, DMA_addr, cpu_addr, request_complete, DMA_8bit_write_enable,DMA_16bit_write_enable,DMA_32bit_write_enable,DMA_read_enable, cpu_write_n, CPU_WRITE_DATA, DMA_WRITE_DATA, antic_fetch_real_reg, cpu_fetch_real_reg, pbi_takeover, pbi_takeover_adj, pbi_release, pbi_cycle_reg,
 		cart_flash_request,cart_flash_wr,cart_flash_address,cart_flash_data,
 		sample_ram_request,sample_ram_address,sample_ram_write_data,sample_ram_write_enable,SDRAM_SAMPLE_ADDR,
-		sid_rom_request,sid_rom_address,SDRAM_SID_ADDR)
+		sid_rom_request,sid_rom_address,SDRAM_SID_ADDR,
+		cpu_sdram_reg,antic_overtake_ok,ovt_addr_reg,ovt_data_reg,ovt_we_reg,ovt_we_freezer_reg)
 	begin
 		start_request <= '0';
 		pbi_request <= '0';
@@ -835,10 +890,53 @@ BEGIN
 					state_next <= state_idle;
 				end if;
 			when state_waiting_cpu =>
+				if (antic_fetch = '1' and cpu_sdram_reg = '1' and antic_overtake_ok = '1' and pbi_cycle_reg = '0') then
+					-- Mega800: the CPU access is waiting on the SDRAM port (HyperRAM),
+					-- which has already latched its address/data and holds its answer.
+					-- ANTIC's fetch goes elsewhere (BRAM/ROM/IO), so serve ANTIC now
+					-- instead of making it late; the CPU access is resumed afterwards.
+					-- NOTE: this decision must not depend on request_complete
+					-- (request_complete depends on addr_next -> combinational loop).
+					start_request <= '1';
+					addr_next <= "0000000000"&antic_ADDR;
+					width_8bit_next <= '1';
+					width_16bit_next <= '0';
+					width_32bit_next <= '0';
+					write_enable_next <= '0';
+					write_enable_freezer_next <= '0';
+					data_WRITE_next <= (others => '0');
+					antic_fetch_real_next <= '1';
+					cpu_fetch_real_next <= '0';
+					state_next <= state_ovt_antic;
+				else
+					notify_cpu <= request_complete;
+					if (pbi_release = '1' or request_complete = '1') then
+						state_next <= state_idle;
+						pbi_cycle_next <= '0';
+					end if;
+				end if;
+			when state_ovt_antic =>
+				-- addr_reg holds ANTIC's address
+				notify_antic <= request_complete;
+				if (request_complete = '1') then
+					state_next <= state_ovt_restore;
+				end if;
+			when state_ovt_restore =>
+				-- put the CPU access back; the SDRAM port is still serving it
+				addr_next <= ovt_addr_reg;
+				data_WRITE_next <= ovt_data_reg;
+				width_8bit_next <= '1';
+				width_16bit_next <= '0';
+				width_32bit_next <= '0';
+				write_enable_next <= ovt_we_reg;
+				write_enable_freezer_next <= ovt_we_freezer_reg;
+				antic_fetch_real_next <= '0';
+				cpu_fetch_real_next <= '1';
 				notify_cpu <= request_complete;
-				if (pbi_release = '1' or request_complete = '1') then
+				if (request_complete = '1') then
 					state_next <= state_idle;
-					pbi_cycle_next <= '0';
+				else
+					state_next <= state_waiting_cpu;
 				end if;
 			when others =>
 				-- NOP

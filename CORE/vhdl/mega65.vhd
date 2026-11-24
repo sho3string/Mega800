@@ -305,6 +305,27 @@ signal qnice_hrbuf_region      : std_logic;   -- '0' = D1, '1' = CAS
 signal qnice_hrbuf_data_from   : std_logic_vector(7 downto 0);
 signal qnice_hrbuf_wait        : std_logic;
 
+-- HyperRAM clock domain: Atari master and mount-buffer master
+signal hr_atari_write          : std_logic;
+signal hr_atari_read           : std_logic;
+signal hr_atari_address        : std_logic_vector(31 downto 0);
+signal hr_atari_writedata      : std_logic_vector(15 downto 0);
+signal hr_atari_byteenable     : std_logic_vector(1 downto 0);
+signal hr_atari_burstcount     : std_logic_vector(7 downto 0);
+signal hr_atari_readdata       : std_logic_vector(15 downto 0);
+signal hr_atari_readdatavalid  : std_logic;
+signal hr_atari_waitrequest    : std_logic;
+
+signal hr_buf_write            : std_logic;
+signal hr_buf_read             : std_logic;
+signal hr_buf_address          : std_logic_vector(31 downto 0);
+signal hr_buf_writedata        : std_logic_vector(15 downto 0);
+signal hr_buf_byteenable       : std_logic_vector(1 downto 0);
+signal hr_buf_burstcount       : std_logic_vector(7 downto 0);
+signal hr_buf_readdata         : std_logic_vector(15 downto 0);
+signal hr_buf_readdatavalid    : std_logic;
+signal hr_buf_waitrequest      : std_logic;
+
 signal main_osrom_addr         : std_logic_vector(13 downto 0);
 signal main_osrom_data         : std_logic_vector(7 downto 0);
 
@@ -383,7 +404,7 @@ begin
 
    qnice_hdmi_view_size_o <= (others => '0');
 
-   -- hr_core_* is driven by i_hrbuf (mount buffers in HyperRAM), see below.
+   -- hr_core_* is driven by i_hr_arbit (Atari memory + mount buffers), see below.
 
    -- Tristate all expansion port drivers that we can directly control
    -- @TODO: As soon as we support modules that can act as busmaster, we need to become more flexible here
@@ -578,7 +599,19 @@ begin
          cas_activity_o         => cas_activity_main,
          
          osm_control_i        => main_osm_control_i,
-         rtc_i                => main_rtc_i
+         rtc_i                => main_rtc_i,
+
+         hr_avm_write_o         => hr_atari_write,
+         hr_avm_read_o          => hr_atari_read,
+         hr_avm_address_o       => hr_atari_address,
+         hr_avm_writedata_o     => hr_atari_writedata,
+         hr_avm_byteenable_o    => hr_atari_byteenable,
+         hr_avm_burstcount_o    => hr_atari_burstcount,
+         hr_avm_readdata_i      => hr_atari_readdata,
+         hr_avm_readdatavalid_i => hr_atari_readdatavalid,
+         hr_avm_waitrequest_i   => hr_atari_waitrequest,
+         hr_clk_i               => hr_clk_i,
+         hr_rst_i               => hr_rst_i
 
       ); -- i_main
       
@@ -1131,17 +1164,63 @@ begin
 
          hr_clk_i           => hr_clk_i,
          hr_rst_i           => hr_rst_i,
-         hr_write_o         => hr_core_write_o,
-         hr_read_o          => hr_core_read_o,
-         hr_address_o       => hr_core_address_o,
-         hr_writedata_o     => hr_core_writedata_o,
-         hr_byteenable_o    => hr_core_byteenable_o,
-         hr_burstcount_o    => hr_core_burstcount_o,
-         hr_readdata_i      => hr_core_readdata_i,
-         hr_readdatavalid_i => hr_core_readdatavalid_i,
-         hr_waitrequest_i   => hr_core_waitrequest_i
+         hr_write_o         => hr_buf_write,
+         hr_read_o          => hr_buf_read,
+         hr_address_o       => hr_buf_address,
+         hr_writedata_o     => hr_buf_writedata,
+         hr_byteenable_o    => hr_buf_byteenable,
+         hr_burstcount_o    => hr_buf_burstcount,
+         hr_readdata_i      => hr_buf_readdata,
+         hr_readdatavalid_i => hr_buf_readdatavalid,
+         hr_waitrequest_i   => hr_buf_waitrequest
       );
    
+---------------------------------------------------------------------------------------------
+-- Atari "SDRAM" address space in HyperRAM (extended RAM, Axlon, carts, freezer)
+--
+-- main.vhd -> sdram_hyperram_adapter (cache + low-latency CDC) -> arbiter
+---------------------------------------------------------------------------------------------
+
+
+   -- Atari (s0) and mount buffers (s1) share the framework's hr_core_* port
+   i_hr_arbit : entity work.avm_arbit
+      generic map (
+         G_PREFER_SWAP  => false,
+         G_ADDRESS_SIZE => 32,
+         G_DATA_SIZE    => 16
+      )
+      port map (
+         clk_i                  => hr_clk_i,
+         rst_i                  => hr_rst_i,
+         s0_avm_write_i         => hr_atari_write,
+         s0_avm_read_i          => hr_atari_read,
+         s0_avm_address_i       => hr_atari_address,
+         s0_avm_writedata_i     => hr_atari_writedata,
+         s0_avm_byteenable_i    => hr_atari_byteenable,
+         s0_avm_burstcount_i    => hr_atari_burstcount,
+         s0_avm_readdata_o      => hr_atari_readdata,
+         s0_avm_readdatavalid_o => hr_atari_readdatavalid,
+         s0_avm_waitrequest_o   => hr_atari_waitrequest,
+         s1_avm_write_i         => hr_buf_write,
+         s1_avm_read_i          => hr_buf_read,
+         s1_avm_address_i       => hr_buf_address,
+         s1_avm_writedata_i     => hr_buf_writedata,
+         s1_avm_byteenable_i    => hr_buf_byteenable,
+         s1_avm_burstcount_i    => hr_buf_burstcount,
+         s1_avm_readdata_o      => hr_buf_readdata,
+         s1_avm_readdatavalid_o => hr_buf_readdatavalid,
+         s1_avm_waitrequest_o   => hr_buf_waitrequest,
+         m_avm_write_o          => hr_core_write_o,
+         m_avm_read_o           => hr_core_read_o,
+         m_avm_address_o        => hr_core_address_o,
+         m_avm_writedata_o      => hr_core_writedata_o,
+         m_avm_byteenable_o     => hr_core_byteenable_o,
+         m_avm_burstcount_o     => hr_core_burstcount_o,
+         m_avm_readdata_i       => hr_core_readdata_i,
+         m_avm_readdatavalid_i  => hr_core_readdatavalid_i,
+         m_avm_waitrequest_i    => hr_core_waitrequest_i
+      );
+
    i_xex_loader : entity work.xex_loader
    port map (
       qnice_clk_i       => qnice_clk_i,

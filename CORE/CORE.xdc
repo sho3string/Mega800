@@ -27,3 +27,9 @@ set_false_path -from [get_clocks qnice_clk] -to [get_pins -hierarchical xex_core
 set_false_path -from [get_clocks qnice_clk] -to [get_pins -hierarchical rom_loaded_sync1_reg/D]
 set_false_path -from [get_clocks qnice_clk] -to [get_pins -hierarchical xex_core_pause_sync1_reg/D]
 set_false_path -from [get_clocks main_clk] -to [get_pins -hierarchical dma_ack_sync1_reg/D]
+
+## Mega800 sdram_hyperram_adapter: toggle-handshake clock crossing main_clk <-> hr_clk.
+## The only paths between these two clocks are this handshake (data is held stable
+## until the 2-FF synchronised toggle is seen on the other side).
+set_max_delay -datapath_only -from [get_clocks main_clk] -to [get_clocks hr_clk]   10.000
+set_max_delay -datapath_only -from [get_clocks hr_clk]   -to [get_clocks main_clk] 20.000

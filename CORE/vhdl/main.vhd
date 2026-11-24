@@ -119,7 +119,22 @@ entity main is
       atari_vbxe_palette_reload_i : in  std_logic;
       
       osm_control_i           : in  std_logic_vector(255 downto 0);
-      rtc_i                   : in  std_logic_vector(64 downto 0)
+      rtc_i                   : in  std_logic_vector(64 downto 0);
+
+      -- Atari "SDRAM" address space, served from HyperRAM (hr_clk_i domain,
+      -- 16-bit word addressed Avalon-MM master). The clock crossing is inside
+      -- sdram_hyperram_adapter.vhd.
+      hr_clk_i                : in  std_logic;
+      hr_rst_i                : in  std_logic;
+      hr_avm_write_o          : out std_logic;
+      hr_avm_read_o           : out std_logic;
+      hr_avm_address_o        : out std_logic_vector(31 downto 0);
+      hr_avm_writedata_o      : out std_logic_vector(15 downto 0);
+      hr_avm_byteenable_o     : out std_logic_vector(1 downto 0);
+      hr_avm_burstcount_o     : out std_logic_vector(7 downto 0);
+      hr_avm_readdata_i       : in  std_logic_vector(15 downto 0);
+      hr_avm_readdatavalid_i  : in  std_logic;
+      hr_avm_waitrequest_i    : in  std_logic
    );
 end entity main;
 
@@ -418,6 +433,10 @@ begin
    "000" when osm_control_i(C_MENU_RAM_8_64)       = '1' else
    "001" when osm_control_i(C_MENU_RAM_16_128)     = '1' else
    "010" when osm_control_i(C_MENU_RAM_32_320C)    = '1' else
+   "100" when osm_control_i(C_MENU_RAM_52_576C)    = '1' else
+   "101" when osm_control_i(C_MENU_RAM_AX_576R)    = '1' else
+   "110" when osm_control_i(C_MENU_RAM_1088R)      = '1' else
+   "111" when osm_control_i(C_MENU_RAM_4M_AXLON)   = '1' else
    "011";  -- 48K / 320K Rambo, also safe/default
    
    atari_vbxe_mode(0) <= osm_control_i(C_MENU_VBXE_D640);
@@ -487,6 +506,18 @@ begin
       -- SDRAM physical interface:
       -- temporary signals initially,
       -- replaced later by HyperRAM bridge
+
+      HR_AVM_WRITE            => hr_avm_write_o,
+      HR_AVM_READ             => hr_avm_read_o,
+      HR_AVM_ADDRESS          => hr_avm_address_o,
+      HR_AVM_WRITEDATA        => hr_avm_writedata_o,
+      HR_AVM_BYTEENABLE       => hr_avm_byteenable_o,
+      HR_AVM_BURSTCOUNT       => hr_avm_burstcount_o,
+      HR_AVM_READDATA         => hr_avm_readdata_i,
+      HR_AVM_READDATAVALID    => hr_avm_readdatavalid_i,
+      HR_AVM_WAITREQUEST      => hr_avm_waitrequest_i,
+      HR_CLK                  => hr_clk_i,
+      HR_RST                  => hr_rst_i,
 
       TURBOFREEZER_ROM_LOADED => '0',
       SDRAM_READY             => sdram_ready,

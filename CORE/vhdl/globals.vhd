@@ -41,28 +41,32 @@ constant C_MENU_MACHINE_800     : natural := 26;
 
                                                  ------------------------------------------
                                                  -- RAM_SELECT    400/800        XL/XE
-constant C_MENU_RAM_8_64        : natural := 28; -- 000           8K             64K
-constant C_MENU_RAM_16_128      : natural := 29; -- 001           16K            128K
-constant C_MENU_RAM_32_320C     : natural := 30; -- 010           32K            320K Compy
-constant C_MENU_RAM_48_320R     : natural := 31; -- 011           48K            320K Rambo
-constant C_MENU_VBXE_DISABLED   : natural := 33;
-constant C_MENU_VBXE_D640       : natural := 34;
-constant C_MENU_VBXE_D740       : natural := 35;
-constant C_MENU_VBXE_NTSC_FIX   : natural := 36;
+constant C_MENU_RAM_8_64        : natural := 46; -- 000           8K             64K
+constant C_MENU_RAM_16_128      : natural := 47; -- 001           16K            128K
+constant C_MENU_RAM_32_320C     : natural := 48; -- 010           32K            320K Compy
+constant C_MENU_RAM_48_320R     : natural := 49; -- 011           48K            320K Rambo
+constant C_MENU_RAM_52_576C     : natural := 50; -- 100           52K            576K Compy
+constant C_MENU_RAM_AX_576R     : natural := 51; -- 101           48K+4MB Axlon  576K Rambo
+constant C_MENU_RAM_1088R       : natural := 52; -- 110           -              1088K Rambo
+constant C_MENU_RAM_4M_AXLON    : natural := 53; -- 111           -              4MB Axlon
+constant C_MENU_VBXE_DISABLED   : natural := 28;
+constant C_MENU_VBXE_D640       : natural := 29;
+constant C_MENU_VBXE_D740       : natural := 30;
+constant C_MENU_VBXE_NTSC_FIX   : natural := 31;
 
-constant C_MENU_OS800_10K       : natural := 39;
-constant C_MENU_OS800_16K       : natural := 40;
-constant C_MENU_OS_LOAD_16K     : natural := 42;
-constant C_MENU_OS_LOAD_10K     : natural := 43;
-constant C_MENU_BASIC_LOAD      : natural := 44;
+constant C_MENU_OS800_10K       : natural := 34;
+constant C_MENU_OS800_16K       : natural := 35;
+constant C_MENU_OS_LOAD_16K     : natural := 37;
+constant C_MENU_OS_LOAD_10K     : natural := 38;
+constant C_MENU_BASIC_LOAD      : natural := 39;
 
-constant C_MENU_VGA_STANDARD    : natural := 49;
-constant C_MENU_VGA_15KHZHSVS   : natural := 53;
-constant C_MENU_VGA_15KHZCS     : natural := 54;
-constant C_MENU_KBD_ATARI       : natural := 58;
-constant C_MENU_KBD_MEGA65      : natural := 59;
-constant C_MENU_PAL             : natural := 61;
-constant C_MENU_CLIP_SIDES      : natural := 62;
+constant C_MENU_VGA_STANDARD    : natural := 58;
+constant C_MENU_VGA_15KHZHSVS   : natural := 62;
+constant C_MENU_VGA_15KHZCS     : natural := 63;
+constant C_MENU_KBD_ATARI       : natural := 67;
+constant C_MENU_KBD_MEGA65      : natural := 68;
+constant C_MENU_PAL             : natural := 70;
+constant C_MENU_CLIP_SIDES      : natural := 71;
 
 
 ----------------------------------------------------------------------------------------------------------

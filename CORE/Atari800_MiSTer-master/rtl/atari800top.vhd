@@ -40,16 +40,19 @@ PORT
 	AUDIO_L    : OUT STD_LOGIC_VECTOR(15 downto 0);
 	AUDIO_R    : OUT STD_LOGIC_VECTOR(15 downto 0);
 
-	SDRAM_BA   : OUT STD_LOGIC_VECTOR(1 downto 0);
-	SDRAM_nCS  : OUT STD_LOGIC;
-	SDRAM_nRAS : OUT STD_LOGIC;
-	SDRAM_nCAS : OUT STD_LOGIC;
-	SDRAM_nWE  : OUT STD_LOGIC;
-	SDRAM_DQMH : OUT STD_LOGIC;
-	SDRAM_DQML : OUT STD_LOGIC;
-	SDRAM_CKE  : OUT STD_LOGIC;
-	SDRAM_A    : OUT STD_LOGIC_VECTOR(12 DOWNTO 0);
-	SDRAM_DQ   : INOUT STD_LOGIC_VECTOR(15 DOWNTO 0);
+	-- Mega800: physical SDRAM pins removed; the core's SDRAM address space
+	-- is served from HyperRAM via sdram_hyperram_adapter (CLK domain).
+	HR_AVM_WRITE         : OUT STD_LOGIC;
+	HR_AVM_READ          : OUT STD_LOGIC;
+	HR_AVM_ADDRESS       : OUT STD_LOGIC_VECTOR(31 downto 0);
+	HR_AVM_WRITEDATA     : OUT STD_LOGIC_VECTOR(15 downto 0);
+	HR_AVM_BYTEENABLE    : OUT STD_LOGIC_VECTOR(1 downto 0);
+	HR_AVM_BURSTCOUNT    : OUT STD_LOGIC_VECTOR(7 downto 0);
+	HR_AVM_READDATA      : IN  STD_LOGIC_VECTOR(15 downto 0);
+	HR_AVM_READDATAVALID : IN  STD_LOGIC;
+	HR_AVM_WAITREQUEST   : IN  STD_LOGIC;
+	HR_CLK               : IN  STD_LOGIC;   -- HR_AVM_* are in this clock domain
+	HR_RST               : IN  STD_LOGIC;
 
 	TURBOFREEZER_ROM_LOADED : in std_logic;
 	OSD_PAUSE : in std_logic;
@@ -382,7 +385,9 @@ GENERIC MAP
 	video_bits => 8,
 	palette => 1,
 	internal_rom => 0,
-	internal_ram => 327680
+	-- Mega800: only the base 64K stays in BRAM (banks 0-3). Everything from
+	-- bank 4 up (130XE/Compy/Rambo/Axlon) goes through the SDRAM port to HyperRAM.
+	internal_ram => 65536
 )
 PORT MAP
 (
@@ -529,18 +534,10 @@ TAPE_ACTIVE <= ((fsk_act and tape_fsk_motor) or (pwm_act and tape_pwm_motor)) an
 
 HPS_DMA_DATA_IN <= dma_memory_data(7 downto 0);
 
-sdram_adaptor : entity work.sdram_statemachine
-GENERIC MAP
-(
-	ADDRESS_WIDTH => 24,
-	AP_BIT => 10,
-	COLUMN_WIDTH => 9,
-	ROW_WIDTH => 13
-)
+sdram_adaptor : entity work.sdram_hyperram_adapter
 PORT MAP
 (
 	CLK_SYSTEM => CLK,
-	CLK_SDRAM => CLK_SDRAM,
 	RESET_N =>  RESET_N,
 	READ_EN => SDRAM_READ_ENABLE,
 	WRITE_EN => SDRAM_WRITE_ENABLE,
@@ -551,20 +548,21 @@ PORT MAP
 	REFRESH => SDRAM_REFRESH,
 	ADDRESS_IN => SDRAM_ADDR,
 	DATA_IN => SDRAM_DI,
-	SDRAM_DQ => SDRAM_DQ,
-	COMPLETE => SDRAM_REQUEST_COMPLETE,
-	SDRAM_BA0 => SDRAM_BA(0),
-	SDRAM_BA1 => SDRAM_BA(1),
-	SDRAM_CKE => SDRAM_CKE,
-	SDRAM_CS_N => SDRAM_nCS,
-	SDRAM_RAS_N => SDRAM_nRAS,
-	SDRAM_CAS_N => SDRAM_nCAS,
-	SDRAM_WE_N => SDRAM_nWE,
-	SDRAM_ldqm => SDRAM_DQML,
-	SDRAM_udqm => SDRAM_DQMH,
 	DATA_OUT => SDRAM_DO,
-	SDRAM_ADDR => SDRAM_A,
-	reset_client_n => SDRAM_RESET_N
+	COMPLETE => SDRAM_REQUEST_COMPLETE,
+	reset_client_n => SDRAM_RESET_N,
+
+	hr_clk_i            => HR_CLK,
+	hr_rst_i            => HR_RST,
+	avm_write_o         => HR_AVM_WRITE,
+	avm_read_o          => HR_AVM_READ,
+	avm_address_o       => HR_AVM_ADDRESS,
+	avm_writedata_o     => HR_AVM_WRITEDATA,
+	avm_byteenable_o    => HR_AVM_BYTEENABLE,
+	avm_burstcount_o    => HR_AVM_BURSTCOUNT,
+	avm_readdata_i      => HR_AVM_READDATA,
+	avm_readdatavalid_i => HR_AVM_READDATAVALID,
+	avm_waitrequest_i   => HR_AVM_WAITREQUEST
 );
 
 joy <= joy1 or joy2 or joy3 or joy4;
