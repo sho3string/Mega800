@@ -1,114 +1,121 @@
-Version 2.0.1 - February 22, 2025
-=================================
+Alpha V3 - November 25, 2026
+============================
 
-Bug fixes
----------
+Atari 800/XL/XE core for MEGA65 R3 and R6. Both builds use the same
+HyperRAM-based memory design.
 
-* Fixed the "jail bar" aka "bar code" HDMI issue that is technically a
-  HyperRAM issue. All cores based on V2.0.0 were affected; mostly on R6
-  devices but there is at least one known R3 occurance.
-
-  If you want to learn more about the phenomenon and the fix, then look at
-  this issue for the R6: https://github.com/MJoergen/C64MEGA65/issues/145
-  And at this for the R3: https://github.com/MJoergen/C64MEGA65/issues/166
-
-* R6 only: Joysticks in port #2 did not work. Due to a bug in the R5/R6
-  boards, the cartridge port needs to be enabled for joystick port 2 to work.
-  Special thanks to rjaremczak for this fix.
-
-* R3 only: Corrected constraint for p1hi_io[0] (cartridge port)
-
-
-Version 2.0.0 - June 28, 2024
-=============================
+**Delete your old `a8cfg` in `/Atari800/` before using this version: the menu
+layout has changed.**
 
 Improvements
 ------------
 
-* Added support for multiple MEGA65 models including the 2024 batches aka R6;
-  currently we support R3/R3A, R4, R5, R6
+* Atari extended memory moved from FPGA block RAM to HyperRAM. This makes
+  the larger memory configurations possible:
+  52K / 576K Compy, 4MB Axlon (400/800) / 576K Rambo, 1088K Rambo and
+  4MB Axlon (XL/XE). The RAM options moved to their own submenu.
 
-* Added support for additional bi-directional Expansion Port signals
+* A 128 KB block RAM cache sits in front of HyperRAM (16-byte lines,
+  write-through, critical word first, next-line prefetch), so most
+  extended-memory accesses run at full speed.
 
-* Increased robustness of HyperRAM
+* The Atari address decoder lets ANTIC's video fetches go ahead of a CPU
+  access that is waiting on HyperRAM. This keeps the display glitch-free
+  while software uses extended memory.
 
-* Support for the MEGA65's I2C architecture
+* Cartridge support ("Load Cart"):
+  - `.car` images, 78 cartridge types, including the OSS super cartridges
+    (types 3 and 45, for example Action!)
+  - raw `.rom` / `.bin` dumps; the cartridge type is chosen from the file
+    size (Standard up to 16K, Bounty Bob 40K, XEGS 32K to 1 MB)
+  - cartridges up to 1 MB, stored in HyperRAM
+  - the activity LED blinks while a cartridge loads
 
-* Support for the MEGA65's real-time-clock
+* Loading an XEX removes any inserted cartridge.
 
-* Two more 60Hz screen resolutions: 4:3 480p and 4:3 800x600 and one 59.94Hz
-  screen resolution: 3:2 480p. Implemented by a more elegant aka dynamic video
-  clock reprogramming.
+* Separate file filters: Drive A shows only `.atr`, Cassette only `.cas`,
+  Load XEX only `.xex`, Load Cart `.car`, `.rom` and `.bin`.
 
-* Better HDMI compatibilty due to switching to the Tyto2 framework and due
-  to fixing an audio bug
-
-* More robust reset handling: Cores start in reset state and the firmware
-  is un-resetting the core when time is ripe
-
-* The power led indicates a long reset by switching to blue
-
-* Run/Stop now has a global "go back" semantic: It either closes an open
-  window (including help screens or file selectors) or it goes back one menu
-  level when the user is in a sub-menu.
+* Disk (D1) and cassette mount buffers moved from block RAM to HyperRAM, so
+  cassette playback and disk access no longer share a buffer.
 
 Bug fixes
 ---------
 
-* The "Audio improvements" feature only worked with analog audio (3.5mm jack)
-  but not with digital audio via HDMI
+* A failed cartridge or XEX load left the OSD hidden, so the error message and
+  the "press Space" prompt were invisible and the menu appeared frozen. The
+  OSD is now shown again together with the error, and the correct error code
+  is displayed.
 
-* Fixed a crash in the file browser
+* After a load error the loaders restarted in the middle of the failed file
+  and reported a misleading "Unexpected EOF". They now wait for the failed
+  file to finish before accepting a new load.
 
-* Fixed missing ".." in folders created with certain macOS versions
+* Reloading a cartridge of the same type started it in the bank (or with the
+  cartridge disabled) that the previous cartridge had left selected.
 
-* Fixed Run/Stop propagation bug when closing the OSM
+* Updated QNICE to 5ccb507 (MiSTer2MEGA65 issue #84): the file browser no
+  longer stops with "Error code: 2704" on folders whose directory exactly
+  fills its clusters, a broken long file name no longer crashes the browser,
+  and seeking to the end of a file whose size is a multiple of the cluster
+  size no longer returns an error.
 
-* MEGA65's internal floppy drive kepts spinning when a floppy was inserted.
+Known limitations
+-----------------
 
-Version 1.0.0 - June 21, 2023
-=============================
+* No PBI and no paddle support.
+* Cartridges larger than 1 MB (MegaCart 2/4 MB, MegaMax) are not supported.
+* Raw OSS dumps must be converted to `.car`. Corina cartridges are not
+  supported. There is no cartridge eject option.
+* 4MB Axlon banks through `$CFFF`; PORTB-only software sees no extended RAM
+  in that mode (as on real hardware).
+* XEX loading targets XL/XE mode only.
 
-Commodore 64 for MEGA65 version 5 is based on this version 1.0.0 of the
-MiSTer2MEGA65 framework.
 
-Version 0.9.1 - January 28, 2023
-================================
+Alpha V2 - October 18, 2026
+===========================
 
-Works with more HDMI monitors, frame grabbers, HDMI switches, etc.
+Improvements
+------------
 
-MiSTer2MEGA65 was not compliant to section 4.2.7 of the HDMI specification
-version 1.4b: It did not assert the +5V power signal. Now it does assert the
-+5 power signal via the FPGA pin `ct_hpd`.
+* CAS cassette image support: the CAS reader parses the image and feeds timed
+  tape data to the emulated cassette interface through a second virtual
+  drive, with a Cassette mount entry in the OSD.
 
-Version 0.9.0 - January 9, 2023
-===============================
+* Playback follows the Atari's cassette motor signal: the tape pauses while
+  the motor is off and keeps its position.
 
-After being in development since April 5, 2021 while being in a constant
-"alpha state" with continuous changes and refactorings, Version 0.9.0 is the
-**first stable version of the MiSTer2MEGA65 (M2M) framework**.
+* The activity LED stays on during cassette playback.
 
-The first production quality core that is based on M2M is the
-[Commodore 64 for MEGA65](https://github.com/MJoergen/C64MEGA65/tree/M2M-V0.9).
-Additionally there is a work-in-progress
-[Apple II core](https://github.com/lydon42/Apple-II_MEGA65/tree/progress)
-based on M2M. The main reason why we are currently using "Version 0.9"
-(0.9.x) for the M2M framework instead of "Version 1.0" is that there is not
-enough documentation available, yet. If you have a look at the
-[MiSTer2MEGA65 Wiki](https://github.com/sy2002/MiSTer2MEGA65/wiki)
-then you will notice, that there are many gaps in the documentation.
+* Cold boot is possible without a valid ATR image mounted previously.
 
-This should not discourage you from using the MiSTer2MEGA65 framework right
-now to port MiSTer cores and other cores to the MEGA65. You can use the
-source code of the
-[Commodore 64 for MEGA65](https://github.com/MJoergen/C64MEGA65/tree/M2M-V0.9)
-as your "user's manual" and "reference handbook" for the M2M framework;
-additionally to the existing
-[Wiki pages](https://github.com/sy2002/MiSTer2MEGA65/wiki).
-For being able to actually use the C64 core's source code as your
-documentation of how to use the M2M framework, we added a tag called
-`M2M-V0.9` to the GitHub repository of the
-[Commodore 64 for MEGA65](https://github.com/MJoergen/C64MEGA65/tree/M2M-V0.9).
-The tag is necessary, because Version 4 of the C64 core was based on an
-earlier version of the M2M framwork and only from the tag `M2M-V0.9` on the
-C64 core is aligned with Version 0.9 of M2M.
+Bug fixes
+---------
+
+* Fixed the cassette transport advancing while the motor was stopped
+  (observed with Gauntlet).
+
+* Fixed Atari CAS cassette playback timing.
+
+Known limitations
+-----------------
+
+* No cartridge, PBI, paddle or 4MB Axlon support.
+
+
+Alpha V1
+========
+
+First public Alpha of the Atari 800/XL/XE core for MEGA65, based on the
+MiSTer Atari800 core and the MiSTer2MEGA65 framework.
+
+* Atari XL/XE and 400/800 machine modes
+* PAL and NTSC
+* ATR disk images (drive D1:), including disk access after boot
+* XEX loading in XL/XE mode, including XEX files whose INIT routines wait for
+  input during loading
+* Configurable Atari RAM up to 48K / 320K Rambo
+* VBXE at `$D640` or `$D740`, NTSC fix, runtime palette loading
+* MEGA65 joystick support and Atari / MEGA65 keyboard mappings
+* Cold and warm reset, OPTION-assisted cold boot
+* Clip sides, HDMI and 15/31 kHz analog video options, RTC
