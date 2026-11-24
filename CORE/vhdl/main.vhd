@@ -56,6 +56,7 @@ entity main is
       -----------------------------------------------------------------------
       xex_loader_mode_i       : in  std_logic;
       xex_reset_i             : in  std_logic;
+      cart1_select_i          : in  std_logic_vector(7 downto 0);  -- cartridge mode (cart_loader)
 
 -- MiSTer core main clock speed:
       -- Make sure you pass very exact numbers here, because they are used for avoiding clock drift at derived clocks
@@ -534,7 +535,7 @@ begin
       SET_HELP_FORCE_IN       => not keyboard_n(m65_f9),
       SET_SPACE_FORCE_IN      => '0', -- not required
 
-      CART1_SELECT_IN         => (others => '0'),
+      CART1_SELECT_IN         => cart1_select_i,
       CART2_SELECT_IN         => (others => '0'),
 
       EMU_FLASH_REQUEST       => open,

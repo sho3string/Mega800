@@ -25,48 +25,48 @@ constant HDMI_VIEW    : hdmi_view_cfg_t         := C_HDMI_VIEW_LEGACY;
 constant C_MENU_CAS_LOAD        : natural := 3;
 constant C_MENU_XEX_LOAD        : natural := 4;
 
-constant C_MENU_HDMI_16_9_50    : natural := 8;
-constant C_MENU_HDMI_16_9_60    : natural := 9;
-constant C_MENU_HDMI_4_3_50     : natural := 10;
-constant C_MENU_HDMI_5_4_50     : natural := 11;
-constant C_MENU_HDMI_640_60     : natural := 12;
-constant C_MENU_HDMI_720_5994   : natural := 13;
-constant C_MENU_SVGA_800_60     : natural := 14;
-constant C_MENU_CRT_EMULATION   : natural := 18;
-constant C_MENU_HDMI_ZOOM       : natural := 19;
-constant C_MENU_IMPROVE_AUDIO   : natural := 20;
+constant C_MENU_HDMI_16_9_50    : natural := 9;
+constant C_MENU_HDMI_16_9_60    : natural := 10;
+constant C_MENU_HDMI_4_3_50     : natural := 11;
+constant C_MENU_HDMI_5_4_50     : natural := 12;
+constant C_MENU_HDMI_640_60     : natural := 13;
+constant C_MENU_HDMI_720_5994   : natural := 14;
+constant C_MENU_SVGA_800_60     : natural := 15;
+constant C_MENU_CRT_EMULATION   : natural := 19;
+constant C_MENU_HDMI_ZOOM       : natural := 20;
+constant C_MENU_IMPROVE_AUDIO   : natural := 21;
 
-constant C_MENU_MACHINE_XLXE    : natural := 25;
-constant C_MENU_MACHINE_800     : natural := 26;
+constant C_MENU_MACHINE_XLXE    : natural := 26;
+constant C_MENU_MACHINE_800     : natural := 27;
 
                                                  ------------------------------------------
                                                  -- RAM_SELECT    400/800        XL/XE
-constant C_MENU_RAM_8_64        : natural := 46; -- 000           8K             64K
-constant C_MENU_RAM_16_128      : natural := 47; -- 001           16K            128K
-constant C_MENU_RAM_32_320C     : natural := 48; -- 010           32K            320K Compy
-constant C_MENU_RAM_48_320R     : natural := 49; -- 011           48K            320K Rambo
-constant C_MENU_RAM_52_576C     : natural := 50; -- 100           52K            576K Compy
-constant C_MENU_RAM_AX_576R     : natural := 51; -- 101           48K+4MB Axlon  576K Rambo
-constant C_MENU_RAM_1088R       : natural := 52; -- 110           -              1088K Rambo
-constant C_MENU_RAM_4M_AXLON    : natural := 53; -- 111           -              4MB Axlon
-constant C_MENU_VBXE_DISABLED   : natural := 28;
-constant C_MENU_VBXE_D640       : natural := 29;
-constant C_MENU_VBXE_D740       : natural := 30;
-constant C_MENU_VBXE_NTSC_FIX   : natural := 31;
+constant C_MENU_RAM_8_64        : natural := 47; -- 000           8K             64K
+constant C_MENU_RAM_16_128      : natural := 48; -- 001           16K            128K
+constant C_MENU_RAM_32_320C     : natural := 49; -- 010           32K            320K Compy
+constant C_MENU_RAM_48_320R     : natural := 50; -- 011           48K            320K Rambo
+constant C_MENU_RAM_52_576C     : natural := 51; -- 100           52K            576K Compy
+constant C_MENU_RAM_AX_576R     : natural := 52; -- 101           48K+4MB Axlon  576K Rambo
+constant C_MENU_RAM_1088R       : natural := 53; -- 110           -              1088K Rambo
+constant C_MENU_RAM_4M_AXLON    : natural := 54; -- 111           -              4MB Axlon
+constant C_MENU_VBXE_DISABLED   : natural := 29;
+constant C_MENU_VBXE_D640       : natural := 30;
+constant C_MENU_VBXE_D740       : natural := 31;
+constant C_MENU_VBXE_NTSC_FIX   : natural := 32;
 
-constant C_MENU_OS800_10K       : natural := 34;
-constant C_MENU_OS800_16K       : natural := 35;
-constant C_MENU_OS_LOAD_16K     : natural := 37;
-constant C_MENU_OS_LOAD_10K     : natural := 38;
-constant C_MENU_BASIC_LOAD      : natural := 39;
+constant C_MENU_OS800_10K       : natural := 35;
+constant C_MENU_OS800_16K       : natural := 36;
+constant C_MENU_OS_LOAD_16K     : natural := 38;
+constant C_MENU_OS_LOAD_10K     : natural := 39;
+constant C_MENU_BASIC_LOAD      : natural := 40;
 
-constant C_MENU_VGA_STANDARD    : natural := 58;
-constant C_MENU_VGA_15KHZHSVS   : natural := 62;
-constant C_MENU_VGA_15KHZCS     : natural := 63;
-constant C_MENU_KBD_ATARI       : natural := 67;
-constant C_MENU_KBD_MEGA65      : natural := 68;
-constant C_MENU_PAL             : natural := 70;
-constant C_MENU_CLIP_SIDES      : natural := 71;
+constant C_MENU_VGA_STANDARD    : natural := 59;
+constant C_MENU_VGA_15KHZHSVS   : natural := 63;
+constant C_MENU_VGA_15KHZCS     : natural := 64;
+constant C_MENU_KBD_ATARI       : natural := 68;
+constant C_MENU_KBD_MEGA65      : natural := 69;
+constant C_MENU_PAL             : natural := 71;
+constant C_MENU_CLIP_SIDES      : natural := 72;
 
 
 ----------------------------------------------------------------------------------------------------------
@@ -151,6 +151,7 @@ constant C_DEV_ATARI_DMA         : std_logic_vector(15 downto 0) := x"0105";
 constant C_DEV_ATARI_D1_BUFFER   : std_logic_vector(15 downto 0) := x"0106";
 constant C_DEV_ATARI_VBXE_PALETTE: std_logic_vector(15 downto 0) := x"0107";
 constant C_DEV_ATARI_CAS_BUFFER  : std_logic_vector(15 downto 0) := x"0108";
+constant C_DEV_ATARI_CART        : std_logic_vector(15 downto 0) := x"0109";
 
 constant C_DEV_DEMO_NOBUFFER     : std_logic_vector(15 downto 0) := x"AAAA";
 
@@ -198,9 +199,11 @@ constant C_CRTROMTYPE_OPTIONAL   : std_logic_vector(15 downto 0) := x"0004";
 --       else it is a 4k window in HyperRAM or in SDRAM
 -- In case we are loading to a QNICE device, then the control and status register is located at the 4k window 0xFFFF.
 -- @TODO: See @TODO for more details about the control and status register
-constant C_CRTROMS_MAN_NUM : natural := 5;
+constant C_CRTROMS_MAN_NUM : natural := 6;
 constant C_CRTROMS_MAN : crtrom_buf_array := (
-   C_CRTROMTYPE_DEVICE, C_DEV_ATARI_DMA,
+   -- Order must match the order of the OPTM_G_LOAD_ROM items in config.vhd
+   C_CRTROMTYPE_DEVICE, C_DEV_ATARI_DMA,             -- Load XEX
+   C_CRTROMTYPE_DEVICE, C_DEV_ATARI_CART,            -- Load Cart
    C_CRTROMTYPE_DEVICE, C_DEV_ATARI_VBXE_PALETTE,
    C_CRTROMTYPE_DEVICE, C_DEV_ATARI_OSROM_16K,
    C_CRTROMTYPE_DEVICE, C_DEV_ATARI_OSROM_10K,

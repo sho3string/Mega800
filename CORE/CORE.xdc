@@ -27,6 +27,7 @@ set_false_path -from [get_clocks qnice_clk] -to [get_pins -hierarchical xex_core
 set_false_path -from [get_clocks qnice_clk] -to [get_pins -hierarchical rom_loaded_sync1_reg/D]
 set_false_path -from [get_clocks qnice_clk] -to [get_pins -hierarchical xex_core_pause_sync1_reg/D]
 set_false_path -from [get_clocks main_clk] -to [get_pins -hierarchical dma_ack_sync1_reg/D]
+set_false_path -from [get_clocks qnice_clk] -to [get_pins -hierarchical {cart_mode_sync1_reg[*]/D}]
 
 ## Mega800 sdram_hyperram_adapter: toggle-handshake clock crossing main_clk <-> hr_clk.
 ## The only paths between these two clocks are this handshake (data is held stable

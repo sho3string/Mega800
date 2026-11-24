@@ -374,6 +374,30 @@ signal atari_dma_data_main        : std_logic_vector(7 downto 0);
 signal atari_dma_read_main        : std_logic;
 
 signal xex_loader_mode_qnice      : std_logic;
+
+-- XEX loader outputs (the DMA path is shared with the cartridge loader)
+signal xex_dma_addr_qnice         : std_logic_vector(25 downto 0);
+signal xex_dma_data_qnice         : std_logic_vector(7 downto 0);
+signal xex_dma_read_qnice         : std_logic;
+signal xex_dma_req_toggle_qnice   : std_logic;
+signal xex_core_reset_raw         : std_logic;
+signal xex_core_pause_raw         : std_logic;
+
+-- Cartridge loader (Step 3)
+signal qnice_cart_ce              : std_logic;
+signal qnice_cart_we              : std_logic;
+signal qnice_cart_data            : std_logic_vector(15 downto 0);
+signal qnice_cart_wait            : std_logic;
+signal cart_dma_addr_qnice        : std_logic_vector(25 downto 0);
+signal cart_dma_data_qnice        : std_logic_vector(7 downto 0);
+signal cart_dma_read_qnice        : std_logic;
+signal cart_dma_req_toggle_qnice  : std_logic;
+signal cart_busy_qnice            : std_logic;
+signal cart_mode_qnice            : std_logic_vector(7 downto 0);
+signal cart_core_reset_qnice      : std_logic;
+signal cart_core_pause_qnice      : std_logic;
+signal cart_mode_sync1            : std_logic_vector(7 downto 0) := (others => '0');
+signal cart_mode_main             : std_logic_vector(7 downto 0) := (others => '0');
 signal xex_loader_mode_sync1      : std_logic := '0';
 signal xex_loader_mode_main       : std_logic := '0';
 
@@ -542,6 +566,7 @@ begin
          -- Atari internal reset request. This stays inside atari800top and
          -- therefore leaves the QNICE/HPS DMA bridge alive.
          xex_reset_i            => xex_core_reset_main,
+         cart1_select_i         => cart_mode_main,
 
          clk_main_speed_i     => CORE_CLK_SPEED,
 
@@ -824,6 +849,8 @@ begin
        
        qnice_xex_ce           <= '0';
        qnice_xex_we           <= '0';
+       qnice_cart_ce          <= '0';
+       qnice_cart_we          <= '0';
         
        qnice_atari_ce         <= '0';
        qnice_atari_we         <= '0';
@@ -888,6 +915,12 @@ begin
                qnice_xex_we       <= qnice_dev_we_i;
                qnice_dev_data_o   <= qnice_xex_data;
                qnice_dev_wait_o   <= qnice_xex_wait;
+
+           when C_DEV_ATARI_CART =>
+               qnice_cart_ce      <= qnice_dev_ce_i;
+               qnice_cart_we      <= qnice_dev_we_i;
+               qnice_dev_data_o   <= qnice_cart_data;
+               qnice_dev_wait_o   <= qnice_cart_wait;
 
            when others =>
               null;
@@ -1232,19 +1265,68 @@ begin
       qnice_data_o      => qnice_xex_data,
       qnice_wait_o      => qnice_xex_wait,
 
-      dma_addr_o        => atari_dma_addr_qnice,
-      dma_data_o        => atari_dma_data_qnice,
-      dma_read_o        => atari_dma_read_qnice,
-      dma_req_toggle_o  => atari_dma_req_toggle_qnice,
+      dma_addr_o        => xex_dma_addr_qnice,
+      dma_data_o        => xex_dma_data_qnice,
+      dma_read_o        => xex_dma_read_qnice,
+      dma_req_toggle_o  => xex_dma_req_toggle_qnice,
 
       dma_ack_toggle_i  => atari_dma_ack_toggle_main,
       dma_readback_i    => atari_dma_readback_main,
 
       xex_loader_mode_o => xex_loader_mode_qnice,
       
-      core_reset_o      => xex_core_reset_qnice,
-      core_pause_o      => xex_core_pause_qnice
+      core_reset_o      => xex_core_reset_raw,
+      core_pause_o      => xex_core_pause_raw
    );
+
+---------------------------------------------------------------------------------------------
+-- Cartridge (.CAR) loader (Step 3)
+--
+-- Shares the Atari DMA path with the XEX loader: while the cartridge loader is
+-- busy it owns address/data; the request toggles are XOR-ed so a flip from
+-- either loader is exactly one request. Reset/pause are OR-ed.
+---------------------------------------------------------------------------------------------
+
+   i_cart_loader : entity work.cart_loader
+   port map (
+      qnice_clk_i       => qnice_clk_i,
+      qnice_rst_i       => qnice_rst_i,
+      qnice_addr_i      => qnice_dev_addr_i,
+      qnice_data_i      => qnice_dev_data_i,
+      qnice_ce_i        => qnice_cart_ce,
+      qnice_we_i        => qnice_cart_we,
+      qnice_data_o      => qnice_cart_data,
+      qnice_wait_o      => qnice_cart_wait,
+
+      dma_addr_o        => cart_dma_addr_qnice,
+      dma_data_o        => cart_dma_data_qnice,
+      dma_read_o        => cart_dma_read_qnice,
+      dma_req_toggle_o  => cart_dma_req_toggle_qnice,
+      dma_ack_toggle_i  => atari_dma_ack_toggle_main,
+
+      busy_o            => cart_busy_qnice,
+      cart_mode_o       => cart_mode_qnice,
+      core_reset_o      => cart_core_reset_qnice,
+      core_pause_o      => cart_core_pause_qnice
+   );
+
+   atari_dma_addr_qnice       <= cart_dma_addr_qnice when cart_busy_qnice = '1' else xex_dma_addr_qnice;
+   atari_dma_data_qnice       <= cart_dma_data_qnice when cart_busy_qnice = '1' else xex_dma_data_qnice;
+   atari_dma_read_qnice       <= cart_dma_read_qnice when cart_busy_qnice = '1' else xex_dma_read_qnice;
+   atari_dma_req_toggle_qnice <= xex_dma_req_toggle_qnice xor cart_dma_req_toggle_qnice;
+
+   xex_core_reset_qnice <= xex_core_reset_raw or cart_core_reset_qnice;
+   xex_core_pause_qnice <= xex_core_pause_raw or cart_core_pause_qnice;
+
+   -- Cartridge mode into the Atari clock domain. It only changes while the
+   -- Atari is paused and held in reset by the cartridge loader.
+   cart_mode_sync_proc : process (main_clk)
+   begin
+      if rising_edge(main_clk) then
+         cart_mode_sync1 <= cart_mode_qnice;
+         cart_mode_main  <= cart_mode_sync1;
+      end if;
+   end process cart_mode_sync_proc;
    
  
 

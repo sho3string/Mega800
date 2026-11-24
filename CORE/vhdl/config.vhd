@@ -76,7 +76,7 @@ type WHS_RECORD_ARRAY_TYPE is array (0 to WHS_RECORDS - 1) of WHS_RECORD_TYPE;
 
 constant SCR_WELCOME : string :=
 
-    "\n Mega 800 Core Alpha V1.0\n" &
+    "\n Mega 800 Core Alpha V2.0\n" &
    " by Muse\n\n" &
    " Powered by MiSTer2MEGA65 v2.1.0\n" &
    " by sy2002 and MJoergen\n\n\n" &
@@ -317,7 +317,7 @@ constant OPTM_S_SAVING     : string := "<Saving>";          -- the internal writ
 --             Do use a lower case \n. If you forget one of them or if you use upper case, you will run into undefined behavior.
 --          2. Start each line that contains an actual menu item (multi- or single-select) with a Space character,
 --             otherwise you will experience visual glitches.
-constant OPTM_SIZE         : natural := 74;  -- amount of items including empty lines:
+constant OPTM_SIZE         : natural := 75;  -- amount of items including empty lines:
                                              -- needs to be equal to the number of lines in OPTM_ITEMS and amount of items in OPTM_GROUPS
                                              -- IMPORTANT: If SAVE_SETTINGS is true and OPTM_SIZE changes: Make sure to re-generate and
                                              -- and re-distribute the config file. You can make a new one using M2M/tools/make_config.sh
@@ -325,7 +325,7 @@ constant OPTM_SIZE         : natural := 74;  -- amount of items including empty 
 -- Net size of the Options menu on the screen in characters (excluding the frame, which is hardcoded to two characters)
 -- Without submenus: Use OPTM_SIZE as height, otherwise count how large the actually visible main menu is.
 constant OPTM_DX           : natural := 23;
-constant OPTM_DY           : natural := 25;
+constant OPTM_DY           : natural := 26;
 
 constant OPTM_ITEMS : string :=
    " Mega 800 Alpha V2.0\n" &
@@ -333,6 +333,7 @@ constant OPTM_ITEMS : string :=
    " Drive A:%s\n" &
    " Cassette:%s\n" &
    " Load XEX:%s\n" &
+   " Load Cart:%s\n" &
    "\n" &
    " HDMI: %s\n" &
    "\n" &
@@ -374,14 +375,14 @@ constant OPTM_ITEMS : string :=
    " RAM: %s\n" &
    " RAM  400/800 / XL/XE\n" &
    "\n" &
-   " 8K / 64K\n" &
-   " 16K / 128K\n" &
-   " 32K / 320K Compy\n" &
-   " 48K / 320K Rambo\n" &
-   " 52K / 576K Compy\n" &
+   " 8K     / 64K\n" &
+   " 16K    / 128K\n" &
+   " 32K    / 320K Compy\n" &
+   " 48K    / 320K Rambo\n" &
+   " 52K    / 576K Compy\n" &
    " 4M Axl / 576K Rambo\n" &
-   " - / 1088K Rambo\n" &
-   " - / 4MB Axlon\n" &
+   " -      / 1088K Rambo\n" &
+   " -      / 4MB Axlon\n" &
    "\n" &
    " Back to main menu\n" &
    "\n" &
@@ -429,6 +430,7 @@ constant OPTM_G_VBXE              : integer := 17;
 constant OPTM_G_VBXE_NTSC_FIX     : integer := 18;
 constant OPTM_G_LOAD_VBXE_PALETTE : integer := 19;
 constant OPTM_G_CAS               : integer := 20;
+constant OPTM_G_LOAD_CART         : integer := 21;
 
 -- !!! DO NOT TOUCH !!!
 type OPTM_GTYPE is array (0 to OPTM_SIZE - 1) of integer range 0 to 2**OPTM_GTC- 1;
@@ -442,6 +444,7 @@ constant OPTM_GROUPS : OPTM_GTYPE := (
                                        OPTM_G_Drive_A + OPTM_G_MOUNT_DRV + OPTM_G_START,      -- Drive A:%s
                                        OPTM_G_CAS + OPTM_G_MOUNT_DRV,                         -- Cassette:%s
                                        OPTM_G_LOAD_ATARI_XEX + OPTM_G_LOAD_ROM,               -- Load XEX:%s
+                                       OPTM_G_LOAD_CART + OPTM_G_LOAD_ROM,                    -- Load Cart:%s
                                        OPTM_G_LINE,
                                        OPTM_G_SUBMENU,                                        -- HDMI: %s
                                        OPTM_G_LINE,
