@@ -85,9 +85,11 @@ architecture beh of cart_loader is
 
    -- Raw .ROM/.BIN (no CAR header): pick the cart type from the file size,
    -- using the most common layout for that size. Anything else needs a .CAR.
-   function raw_size_to_type(len : std_logic_vector(22 downto 0)) return natural is
+   -- The size is known only at end of file: M2M writes the file size into
+   -- the CSR after it has streamed the data, so it is counted here instead.
+   function raw_size_to_type(len : unsigned(20 downto 0)) return natural is
    begin
-      case to_integer(unsigned(len)) is
+      case to_integer(len) is
          when 16#000800# => return 57;   --    2K Standard
          when 16#001000# => return 58;   --    4K Standard
          when 16#002000# => return 1;    --    8K Standard
@@ -230,6 +232,8 @@ architecture beh of cart_loader is
 
    -- Control
    signal busy        : std_logic := '0';
+   signal raw_rom     : std_logic := '0';   -- '1' = raw .ROM/.BIN, type from size at EOF
+   signal err_armed   : std_logic := '0';   -- '1' = request left LDNG since the error
    signal core_reset  : std_logic := '0';
    signal core_pause  : std_logic := '0';
    signal wait_count  : unsigned(7 downto 0) := (others => '0');
@@ -306,6 +310,7 @@ begin
 
       procedure fail(code : std_logic_vector(3 downto 0)) is
       begin
+         err_armed        <= '0';
          qnice_resp_error <= code;
          state            <= ERROR_ST;
       end procedure fail;
@@ -383,6 +388,7 @@ begin
                            fail(x"3");                           -- unknown / unsupported type
                         else
                            mode_reg  <= car_to_mode(type_v);
+                           raw_rom   <= '0';
                            -- Unplug the old cartridge before its image is overwritten.
                            -- CartLogic only resets its bank/enable registers when
                            -- cart_mode CHANGES, so going via 0 guarantees the new
@@ -390,11 +396,10 @@ begin
                            cart_mode <= (others => '0');
                            state     <= PAYLOAD_ST;
                         end if;
-                     elsif raw_size_to_type(qnice_req_length) = 0 then
-                        fail(x"6");                              -- raw ROM of unknown size
                      else
-                        -- Raw .ROM/.BIN: the 16 bytes already read are ROM data
-                        mode_reg  <= car_to_mode(to_unsigned(raw_size_to_type(qnice_req_length), 8));
+                        -- Raw .ROM/.BIN: the 16 bytes already read are ROM data.
+                        -- The type is chosen from the size at end of file.
+                        raw_rom   <= '1';
                         cart_mode <= (others => '0');            -- unplug, see above
                         hdr_count <= (others => '0');
                         state     <= FLUSH_ST;
@@ -433,6 +438,13 @@ begin
                      elsif qnice_req_status = C_CSR_REQ_OK then
                         if payload_addr = 0 then
                            fail(x"5");                           -- header only
+                        elsif raw_rom = '1' then
+                           if raw_size_to_type(payload_addr) = 0 then
+                              fail(x"6");                        -- raw ROM of unknown size
+                           else
+                              mode_reg <= car_to_mode(to_unsigned(raw_size_to_type(payload_addr), 8));
+                              state    <= COLDST_ST;
+                           end if;
                         else
                            state <= COLDST_ST;
                         end if;
@@ -506,7 +518,15 @@ begin
                      core_reset        <= '0';
                      core_pause        <= '0';
                      busy              <= '0';
-                     if qnice_req_status = C_CSR_REQ_LDNG then
+                     -- The firmware keeps streaming the rest of the failed file
+                     -- (writes are accepted and dropped here) and only then sets
+                     -- OK. Restart only on a NEW load, i.e. after the request
+                     -- has left LDNG; restarting mid-file reads the remaining
+                     -- bytes as a new header.
+                     if qnice_req_status /= C_CSR_REQ_LDNG then
+                        err_armed <= '1';
+                     end if;
+                     if qnice_req_status = C_CSR_REQ_LDNG and err_armed = '1' then
                         start_load;
                      elsif qnice_req_status = C_CSR_REQ_IDLE then
                         qnice_resp_status <= C_CSR_RESP_IDLE;
