@@ -125,11 +125,19 @@ _FFILES_LOADROM CMP     CTX_LOAD_ROM, R10
                 RBRA    _FFILES_RET, 1
 
 
-                ; Cartridge group -> only .CAR
+                ; Cartridge group -> .CAR, .ROM and .BIN
 _FFILES_CART    CMP     OPTM_G_LOAD_CART, R11
                 RBRA    _FFILES_PALETTE, !Z
 
                 MOVE    ATARI_CARFILE, R9
+                RSUB    M2M$CHK_EXT, 1
+                RBRA    _FFILES_RET_0, C
+
+                MOVE    ATARI_ROMFILE, R9
+                RSUB    M2M$CHK_EXT, 1
+                RBRA    _FFILES_RET_0, C
+
+                MOVE    ATARI_BINFILE, R9
                 RSUB    M2M$CHK_EXT, 1
                 RBRA    _FFILES_RET_0, C
 
@@ -286,6 +294,7 @@ ATARI_ACTFILE   	.ASCII_W ".ACT"
 ATARI_ROMFILE   	.ASCII_W ".ROM"
 ATARI_CASFILE     .ASCII_W ".CAS"
 ATARI_CARFILE     .ASCII_W ".CAR"
+ATARI_BINFILE     .ASCII_W ".BIN"
 
 ; This needs to be the last thing before the "Variables" sections starts
 END_OF_ROM      .DW 0

@@ -1,5 +1,10 @@
 ----------------------------------------------------------------------------------
--- Mega800: Atari 8-bit cartridge (.CAR) loader
+-- Mega800: Atari 8-bit cartridge loader (.CAR and raw .ROM/.BIN)
+--
+-- A file that starts with "CART" is treated as .CAR (type from the header).
+-- Anything else is a raw ROM dump; its cart type is chosen from the file size
+-- (2K/4K/8K/16K Standard, 32K-1M XEGS, 40K Bounty Bob). Other raw sizes are
+-- rejected with "Unknown ROM size".
 --
 -- Official M2M CSR device (same structure as xex_loader.vhd). The M2M manual
 -- loader streams the .CAR file into this device:
@@ -71,11 +76,32 @@ architecture beh of cart_loader is
        3      => "Unsupported type   \n",
        4      => "Cart too large     \n",
        5      => "Unexpected EOF     \n",
+       6      => "Unknown ROM size   \n",
        others => "Unknown error      \n"
    );
 
    constant C_MAX_PAYLOAD : unsigned(20 downto 0) := to_unsigned(16#100000#, 21);  -- 1 MB
    constant C_COLDST      : std_logic_vector(15 downto 0) := x"0244";
+
+   -- Raw .ROM/.BIN (no CAR header): pick the cart type from the file size,
+   -- using the most common layout for that size. Anything else needs a .CAR.
+   function raw_size_to_type(len : std_logic_vector(22 downto 0)) return natural is
+   begin
+      case to_integer(unsigned(len)) is
+         when 16#000800# => return 57;   --    2K Standard
+         when 16#001000# => return 58;   --    4K Standard
+         when 16#002000# => return 1;    --    8K Standard
+         when 16#004000# => return 2;    --   16K Standard
+         when 16#008000# => return 12;   --   32K XEGS
+         when 16#00A000# => return 18;   --   40K Bounty Bob
+         when 16#010000# => return 13;   --   64K XEGS
+         when 16#020000# => return 14;   --  128K XEGS
+         when 16#040000# => return 23;   --  256K XEGS
+         when 16#080000# => return 24;   --  512K XEGS
+         when 16#100000# => return 25;   -- 1024K XEGS
+         when others     => return 0;
+      end case;
+   end function raw_size_to_type;
 
    -- CAR type -> core cart mode (0 = unsupported)
    function car_to_mode(t : unsigned(7 downto 0)) return std_logic_vector is
@@ -164,7 +190,7 @@ architecture beh of cart_loader is
    end function car_to_mode;
 
    type state_t is (
-      IDLE_ST, PAUSE_ST, HDR_ST, CHECK_ST, PAYLOAD_ST, DMA_WAIT_ST, RELEASE_ST,
+      IDLE_ST, PAUSE_ST, HDR_ST, CHECK_ST, FLUSH_ST, PAYLOAD_ST, DMA_WAIT_ST, RELEASE_ST,
       COLDST_ST, SET_MODE_ST, RESET_HOLD_ST, RESUME_ST, DONE_ST, ERROR_ST
    );
    signal state            : state_t := IDLE_ST;
@@ -349,15 +375,43 @@ begin
                      end if;
 
                   when CHECK_ST =>
-                     type_v := unsigned(hdr(7));
-                     if hdr(0) /= x"43" or hdr(1) /= x"41" or hdr(2) /= x"52" or hdr(3) /= x"54" then
-                        fail(x"2");                              -- not "CART"
-                     elsif hdr(4) /= x"00" or hdr(5) /= x"00" or hdr(6) /= x"00" or
+                     if hdr(0) = x"43" and hdr(1) = x"41" and hdr(2) = x"52" and hdr(3) = x"54" then
+                        -- .CAR: type from the header, payload starts after it
+                        type_v := unsigned(hdr(7));
+                        if hdr(4) /= x"00" or hdr(5) /= x"00" or hdr(6) /= x"00" or
                            car_to_mode(type_v) = x"00" then
-                        fail(x"3");                              -- unknown / unsupported type
+                           fail(x"3");                           -- unknown / unsupported type
+                        else
+                           mode_reg  <= car_to_mode(type_v);
+                           -- Unplug the old cartridge before its image is overwritten.
+                           -- CartLogic only resets its bank/enable registers when
+                           -- cart_mode CHANGES, so going via 0 guarantees the new
+                           -- cartridge always starts in its power-on bank.
+                           cart_mode <= (others => '0');
+                           state     <= PAYLOAD_ST;
+                        end if;
+                     elsif raw_size_to_type(qnice_req_length) = 0 then
+                        fail(x"6");                              -- raw ROM of unknown size
                      else
-                        mode_reg <= car_to_mode(type_v);
-                        state    <= PAYLOAD_ST;
+                        -- Raw .ROM/.BIN: the 16 bytes already read are ROM data
+                        mode_reg  <= car_to_mode(to_unsigned(raw_size_to_type(qnice_req_length), 8));
+                        cart_mode <= (others => '0');            -- unplug, see above
+                        hdr_count <= (others => '0');
+                        state     <= FLUSH_ST;
+                     end if;
+
+                  -- Raw ROM: write the 16 buffered bytes to cart offsets 0..15
+                  when FLUSH_ST =>
+                     if hdr_count = 16 then
+                        state <= PAYLOAD_ST;                     -- payload_addr is now 16
+                     else
+                        dma_addr_reg       <= "101" & "000" & std_logic_vector(payload_addr(19 downto 0));
+                        dma_data_reg       <= hdr(to_integer(hdr_count(3 downto 0)));
+                        dma_req_toggle_reg <= not dma_req_toggle_reg;
+                        payload_addr       <= payload_addr + 1;
+                        hdr_count          <= hdr_count + 1;
+                        dma_return_state   <= FLUSH_ST;
+                        state              <= DMA_WAIT_ST;
                      end if;
 
                   -- ROM payload -> cartridge window via DMA
@@ -442,8 +496,10 @@ begin
                         state <= IDLE_ST;
                      end if;
 
-                  -- On error the previous cartridge mode is left unchanged; the
-                  -- Atari is released again.
+                  -- On a header error the previous cartridge stays plugged in.
+                  -- Once the payload has started the old image is gone, so the
+                  -- cartridge stays unplugged (cart_mode = 0). The Atari is
+                  -- released again either way.
                   when ERROR_ST =>
                      qnice_wait_reg    <= '0';
                      qnice_resp_status <= C_CSR_RESP_ERROR;
