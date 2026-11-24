@@ -180,6 +180,7 @@ architecture beh of xex_loader is
    );
 
    signal state            : state_t := IDLE_ST;
+   signal err_armed        : std_logic := '0';
    signal dma_return_state : state_t := IDLE_ST;
    signal stream_return_state : state_t := IDLE_ST;
 
@@ -550,6 +551,11 @@ begin
             ----------------------------------------------------------------
             -- Framework explicitly reported an error
             ----------------------------------------------------------------
+
+            -- Error re-arm: see ERROR_ST
+            if state /= ERROR_ST then
+               err_armed <= '0';
+            end if;
 
             if qnice_req_status = C_CSR_REQ_ERR then
 
@@ -1662,9 +1668,15 @@ begin
                      core_reset <= '0';
                      core_pause <= '0';
 
-                     -- Same re-arm rule as DONE_ST: a new manual file load can
-                     -- transition directly to LDNG without an intervening IDLE.
-                     if qnice_req_status = C_CSR_REQ_LDNG then
+                     -- A new manual file load can go directly to LDNG without an
+                     -- intervening IDLE, but after a mid-file error the firmware
+                     -- is still streaming the failed file under the same LDNG.
+                     -- Restart only once the request has left LDNG.
+                     if qnice_req_status /= C_CSR_REQ_LDNG then
+                        err_armed <= '1';
+                     end if;
+
+                     if qnice_req_status = C_CSR_REQ_LDNG and err_armed = '1' then
 
                         qnice_wait_reg <= '1';
 

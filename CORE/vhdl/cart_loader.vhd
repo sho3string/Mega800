@@ -23,8 +23,14 @@
 -- support/atari8bit/atari800.cpp (cart_def[]); mode values are the core's
 -- cart_logic.vhd cart_mode_* constants.
 --
+-- OSS 2-chip carts (CAR 3 = 034M, CAR 45 = 043M) are rebuilt the way MiSTer
+-- does it, into the 24K layout the core's OSS 043M mode expects:
+--    blocks 0..3 : the four 4K ROM blocks (CAR 3: input blocks 1 and 2 swapped)
+--    block 4     : block 0 AND block 2
+--    block 5     : block 1 AND block 2
+-- Blocks 4/5 are made after the stream by reading back through DMA.
+--
 -- Not supported in this version (reported as "Unsupported type"):
---    CAR 3, 45  OSS 034M/043M  (MiSTer reorders 4K blocks and ANDs two banks)
 --    CAR 84, 85 Corina          (EEPROM handling)
 --    carts > 1 MB               (HyperRAM cartridge window is 1 MB)
 ----------------------------------------------------------------------------------
@@ -57,9 +63,11 @@ entity cart_loader is
       dma_read_o        : out std_logic;
       dma_req_toggle_o  : out std_logic;
       dma_ack_toggle_i  : in  std_logic;
+      dma_readback_i    : in  std_logic_vector(7 downto 0);
       -----------------------------------------------------------------------
       -- Atari control (QNICE clock domain; synchronised in mega65.vhd)
       -----------------------------------------------------------------------
+      eject_i           : in  std_logic;   -- '1' = unplug the cartridge (e.g. XEX load)
       busy_o            : out std_logic;                     -- owns the DMA path
       cart_mode_o       : out std_logic_vector(7 downto 0);  -- -> CART1_SELECT_IN
       core_reset_o      : out std_logic;
@@ -119,6 +127,8 @@ architecture beh of cart_loader is
          when  12 => return x"30";  -- XEGS               32K  TC_MODE_XEGS_32
          when  13 => return x"31";  -- XEGS Bank 0-7      64K  TC_MODE_XEGS_64
          when  14 => return x"32";  -- XEGS              128K  TC_MODE_XEGS_128
+         when   3 => return x"06";  -- OSS 2 Chip 034M    16K  TC_MODE_OSS_043M (reordered)
+         when  45 => return x"06";  -- OSS 2 Chip 043M    16K  TC_MODE_OSS_043M
          when  15 => return x"04";  -- OSS 1 Chip         16K  TC_MODE_OSS_16
          when  17 => return x"0C";  -- Atrax Decoded     128K  TC_MODE_ATRAX128
          when  18 => return x"73";  -- Bounty Bob         40K  TC_MODE_BOUNTY_40
@@ -192,7 +202,7 @@ architecture beh of cart_loader is
    end function car_to_mode;
 
    type state_t is (
-      IDLE_ST, PAUSE_ST, HDR_ST, CHECK_ST, FLUSH_ST, PAYLOAD_ST, DMA_WAIT_ST, RELEASE_ST,
+      IDLE_ST, PAUSE_ST, HDR_ST, CHECK_ST, FLUSH_ST, PAYLOAD_ST, AND_RA_ST, AND_RB_ST, AND_W_ST, DMA_WAIT_ST, RELEASE_ST,
       COLDST_ST, SET_MODE_ST, RESET_HOLD_ST, RESUME_ST, DONE_ST, ERROR_ST
    );
    signal state            : state_t := IDLE_ST;
@@ -232,7 +242,13 @@ architecture beh of cart_loader is
 
    -- Control
    signal busy        : std_logic := '0';
-   signal raw_rom     : std_logic := '0';   -- '1' = raw .ROM/.BIN, type from size at EOF
+   signal raw_rom     : std_logic := '0';
+   signal oss_rom     : std_logic := '0';   -- '1' = OSS 2-chip, rebuild to 24K
+   signal oss_swap    : std_logic := '0';   -- '1' = CAR 3: swap 4K blocks 1 and 2
+   signal and_idx     : unsigned(12 downto 0) := (others => '0');  -- bit 12 = block 4/5, 11..0 = byte
+   signal and_a       : std_logic_vector(7 downto 0) := (others => '0');
+   signal dma_read_reg     : std_logic := '0';
+   signal dma_readback_reg : std_logic_vector(7 downto 0) := (others => '0');   -- '1' = raw .ROM/.BIN, type from size at EOF
    signal err_armed   : std_logic := '0';   -- '1' = request left LDNG since the error
    signal core_reset  : std_logic := '0';
    signal core_pause  : std_logic := '0';
@@ -263,7 +279,7 @@ begin
 
    dma_addr_o       <= dma_addr_reg;
    dma_data_o       <= dma_data_reg;
-   dma_read_o       <= '0';
+   dma_read_o       <= dma_read_reg;
    dma_req_toggle_o <= dma_req_toggle_reg;
 
    busy_o       <= busy;
@@ -333,10 +349,17 @@ begin
             core_pause         <= '0';
             cart_mode          <= (others => '0');
             dma_req_toggle_reg <= '0';
+            dma_read_reg       <= '0';
             dma_ack_seen       <= '0';
          else
 
             qnice_wait_reg <= '1';
+
+            -- Another loader (XEX) takes over the Atari: unplug the cartridge so
+            -- it cannot take control at reset or hide RAM at $8000-$BFFF.
+            if eject_i = '1' and busy = '0' then
+               cart_mode <= (others => '0');
+            end if;
 
             live_byte_v := qnice_ce_i = '1' and qnice_csr = '0' and qnice_we_i = '1' and
                            (stream_addr_valid = '0' or qnice_addr_i /= last_stream_addr);
@@ -389,6 +412,14 @@ begin
                         else
                            mode_reg  <= car_to_mode(type_v);
                            raw_rom   <= '0';
+                           oss_rom   <= '0';
+                           oss_swap  <= '0';
+                           if type_v = 3 or type_v = 45 then
+                              oss_rom <= '1';
+                           end if;
+                           if type_v = 3 then
+                              oss_swap <= '1';
+                           end if;
                            -- Unplug the old cartridge before its image is overwritten.
                            -- CartLogic only resets its bank/enable registers when
                            -- cart_mode CHANGES, so going via 0 guarantees the new
@@ -400,6 +431,8 @@ begin
                         -- Raw .ROM/.BIN: the 16 bytes already read are ROM data.
                         -- The type is chosen from the size at end of file.
                         raw_rom   <= '1';
+                        oss_rom   <= '0';
+                        oss_swap  <= '0';
                         cart_mode <= (others => '0');            -- unplug, see above
                         hdr_count <= (others => '0');
                         state     <= FLUSH_ST;
@@ -412,6 +445,7 @@ begin
                      else
                         dma_addr_reg       <= "101" & "000" & std_logic_vector(payload_addr(19 downto 0));
                         dma_data_reg       <= hdr(to_integer(hdr_count(3 downto 0)));
+                        dma_read_reg       <= '0';
                         dma_req_toggle_reg <= not dma_req_toggle_reg;
                         payload_addr       <= payload_addr + 1;
                         hdr_count          <= hdr_count + 1;
@@ -422,10 +456,17 @@ begin
                   -- ROM payload -> cartridge window via DMA
                   when PAYLOAD_ST =>
                      if live_byte_v then
-                        if payload_addr = C_MAX_PAYLOAD then
-                           fail(x"4");                           -- more than 1 MB
+                        if payload_addr = C_MAX_PAYLOAD or (oss_rom = '1' and payload_addr = 16#4000#) then
+                           fail(x"4");                           -- more than 1 MB (OSS: 16K)
                         else
-                           dma_addr_reg       <= "101" & "000" & std_logic_vector(payload_addr(19 downto 0));
+                           dma_read_reg       <= '0';
+                           if oss_swap = '1' then                -- CAR 3: blocks 1 <-> 2
+                              dma_addr_reg    <= "101" & "000" & std_logic_vector(payload_addr(19 downto 14)) &
+                                                 payload_addr(12) & payload_addr(13) &
+                                                 std_logic_vector(payload_addr(11 downto 0));
+                           else
+                              dma_addr_reg    <= "101" & "000" & std_logic_vector(payload_addr(19 downto 0));
+                           end if;
                            dma_data_reg       <= byte_v;
                            dma_req_toggle_reg <= not dma_req_toggle_reg;
                            payload_addr       <= payload_addr + 1;
@@ -438,6 +479,13 @@ begin
                      elsif qnice_req_status = C_CSR_REQ_OK then
                         if payload_addr = 0 then
                            fail(x"5");                           -- header only
+                        elsif oss_rom = '1' then
+                           if payload_addr /= 16#4000# then
+                              fail(x"5");                        -- OSS 2-chip must be 16K
+                           else
+                              and_idx <= (others => '0');
+                              state   <= AND_RA_ST;
+                           end if;
                         elsif raw_rom = '1' then
                            if raw_size_to_type(payload_addr) = 0 then
                               fail(x"6");                        -- raw ROM of unknown size
@@ -450,9 +498,39 @@ begin
                         end if;
                      end if;
 
+                  -- OSS: block 4+k = block k AND block 2 (k = and_idx(12))
+                  when AND_RA_ST =>
+                     dma_addr_reg       <= "101" & "000" & "00000" & "00" & and_idx(12) & std_logic_vector(and_idx(11 downto 0));
+                     dma_read_reg       <= '1';
+                     dma_req_toggle_reg <= not dma_req_toggle_reg;
+                     dma_return_state   <= AND_RB_ST;
+                     state              <= DMA_WAIT_ST;
+
+                  when AND_RB_ST =>
+                     and_a              <= dma_readback_reg;
+                     dma_addr_reg       <= "101" & "000" & "00000" & "010" & std_logic_vector(and_idx(11 downto 0));
+                     dma_read_reg       <= '1';
+                     dma_req_toggle_reg <= not dma_req_toggle_reg;
+                     dma_return_state   <= AND_W_ST;
+                     state              <= DMA_WAIT_ST;
+
+                  when AND_W_ST =>
+                     dma_addr_reg       <= "101" & "000" & "00000" & "10" & and_idx(12) & std_logic_vector(and_idx(11 downto 0));
+                     dma_data_reg       <= and_a and dma_readback_reg;
+                     dma_read_reg       <= '0';
+                     dma_req_toggle_reg <= not dma_req_toggle_reg;
+                     and_idx            <= and_idx + 1;
+                     if and_idx = 16#1FFF# then
+                        dma_return_state <= COLDST_ST;
+                     else
+                        dma_return_state <= AND_RA_ST;
+                     end if;
+                     state              <= DMA_WAIT_ST;
+
                   when DMA_WAIT_ST =>
                      if dma_ack_sync2 /= dma_ack_seen then
-                        dma_ack_seen <= dma_ack_sync2;
+                        dma_ack_seen     <= dma_ack_sync2;
+                        dma_readback_reg <= dma_readback_i;
                         state        <= dma_return_state;
                      end if;
 
@@ -467,6 +545,7 @@ begin
 
                   -- Force an OS cold start (COLDST <> 0) so the cartridge is initialised
                   when COLDST_ST =>
+                     dma_read_reg       <= '0';
                      dma_addr_reg       <= "0000000000" & C_COLDST;
                      dma_data_reg       <= x"01";
                      dma_req_toggle_reg <= not dma_req_toggle_reg;

@@ -494,11 +494,17 @@ _HM_XEX_VISIBLE
                 ; LOAD_IMAGE failed. XEX loading temporarily connected
                 ; keyboard/joysticks to the core. Since the Shell owns
                 ; the error/file-browser UI again, disconnect them.
+                ; The OSD was hidden for the load: show it again, or the
+                ; error and the "press Space" prompt are invisible and the
+                ; menu looks frozen. R8 (error code) must survive.
                 CMP     1, R5
                 RBRA    _HM_LOAD_ERR_KBD_DONE, !Z
 
+                MOVE    R8, @--SP
                 MOVE    M2M$CSR, R8
                 AND     M2M$CSR_UN_KBD_JOY, @R8
+                MOVE    @SP++, R8
+                RSUB    SCR$OSM_M_ON, 1
 
 _HM_LOAD_ERR_KBD_DONE
 

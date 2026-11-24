@@ -398,6 +398,9 @@ signal cart_core_reset_qnice      : std_logic;
 signal cart_core_pause_qnice      : std_logic;
 signal cart_mode_sync1            : std_logic_vector(7 downto 0) := (others => '0');
 signal cart_mode_main             : std_logic_vector(7 downto 0) := (others => '0');
+signal cart_busy_sync1            : std_logic := '0';
+signal cart_busy_main             : std_logic := '0';
+signal cart_led_cnt               : unsigned(22 downto 0) := (others => '0');
 signal xex_loader_mode_sync1      : std_logic := '0';
 signal xex_loader_mode_main       : std_logic := '0';
 
@@ -1303,7 +1306,9 @@ begin
       dma_read_o        => cart_dma_read_qnice,
       dma_req_toggle_o  => cart_dma_req_toggle_qnice,
       dma_ack_toggle_i  => atari_dma_ack_toggle_main,
+      dma_readback_i    => atari_dma_readback_main,
 
+      eject_i           => xex_core_pause_raw,
       busy_o            => cart_busy_qnice,
       cart_mode_o       => cart_mode_qnice,
       core_reset_o      => cart_core_reset_qnice,
@@ -1325,6 +1330,15 @@ begin
       if rising_edge(main_clk) then
          cart_mode_sync1 <= cart_mode_qnice;
          cart_mode_main  <= cart_mode_sync1;
+
+         -- Drive LED blinks (about 3.4 Hz at 28.6 MHz) while a cartridge loads
+         cart_busy_sync1 <= cart_busy_qnice;
+         cart_busy_main  <= cart_busy_sync1;
+         if cart_busy_main = '1' then
+            cart_led_cnt <= cart_led_cnt + 1;
+         else
+            cart_led_cnt <= (others => '0');
+         end if;
       end if;
    end process cart_mode_sync_proc;
    
@@ -1357,7 +1371,8 @@ begin
    --main_drive_led_o     <= '0';
    --main_drive_led_col_o <= x"00FF00";  -- 24-bit RGB value for the led
    
-   main_drive_led_o <= atr_sector4_ok_main or cas_activity_main;
+   main_drive_led_o <= atr_sector4_ok_main or cas_activity_main or
+                       (cart_busy_main and not cart_led_cnt(22));
    main_drive_led_col_o <= x"FF0000";
   
 end architecture synthesis;
