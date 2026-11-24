@@ -1,42 +1,61 @@
-YOUR PROJECT NAME for MEGA65 aka GITHUB REPO SHORT NAME
-=======================================================
+Atari 800/XL/XE for MEGA65 aka Mega800
+======================================
 
-done in YEAR by YOUR NAME
+done in 2026 by sho3string
 
-YOUR WEBSITE
-YOUR GITHUB SITE
+https://github.com/sho3string
+https://github.com/sho3string/Mega800
 
-REPO SHORT NAME is licensed under the terms of GNU/GPL v3, for more information please read the file LICENSE
-Parts of REPO SHORT NAME are licensed under other Free-software licenses as described in the source code
+Special thanks to sy2002 and MJoergen for the M2M framework
+  * sy2002     github.com/sy2002     www.sy2002.de
+  * MJoergen   github.com/MJoergen
 
-GITHUB REPO SHORT NAME:
------------------------
+Mega800 is licensed under the terms of GNU/GPL v3, for more information please read the file LICENSE
+Parts of Mega800 are licensed under other Free-software licenses as described in the source code
 
-  GITHUB REPO SHORT NAME is a port of MISTER'S REPO SHORT NAME
+Please note: the Atari 8-bit core VHDL by Mark Watson comes with its own
+COPYRIGHT_NOTICE (see CORE/Atari800_MiSTer-master/COPYRIGHT_NOTICE): it may be
+used for non-commercial purposes; commercial use or sale of the source, binaries
+or derived works requires his explicit permission.
+
+Mega800:
+--------
+
+  Mega800 is a port of MiSTer's Atari800 core
       done by the MiSTer Development Team
-      Original GitHub Repository: https://github.com/MiSTer-devel/MISTER-REPO-LINK
+      Original GitHub Repository: https://github.com/MiSTer-devel/Atari800_MiSTer
       Significant contributors:
-      * NAME THE MAIN
-      * CONTRIBUTORS
-      * ON MiSTer's SIDE
+      * Wojciech Mostowski (woj76): maintainer; VBXE, PokeyMax integration,
+        cartridge, cassette, PBI and many other extensions
+      * Alexey Melnikov (sorgelig): original MiSTer port
+      * claude
+      * carlosbravoa
 
-  MISTER'S REPO SHORT NAME is a port of MiST's MiST NAME/OTHER SOURCE IN CASE MiSTer ported it from MIST/OTHER SOURCE
-      done by the MiST Development Team
-      Original GitHub Repository: https://github.com/mist-devel/MIST-REPO-LINK OR OTHER SOURCE
+  MiSTer's Atari800 core is a port of the Atari 800XL FPGA core
+      done by Mark Watson
+      Original Repository: http://www.64kib.com/redmine/projects/eclairexl
       Significant contributors:
-      * NAME THE MAIN
-      * CONTRIBUTORS
-      * ON MiST's SIDE (OR OTHER SOURCE)
+      * Mark Watson (foft): ANTIC, GTIA, POKEY, PIA, address decoder,
+        PokeyMax and the overall Atari 8-bit core design
 
-  LIST SOME MORE SIGNIFICANT / MAIN AUTHERS OF SUBMODULES
-  HAVE A LOOK AT THIS EXAMPLE HOW TO: https://github.com/sy2002/gbc4mega65/blob/master/AUTHORS
+  Significant authors of modules used inside the Atari800 core:
+      * Matthias Reichl (HiassofT): cartridge logic (cart_logic.vhd) and
+        freezer logic (freezer_logic.vhd)
+      * Peter Wendrich: 65xx CPU core (cpu_65xx.vhd, from FPGA64)
+        http://www.syntiac.com/fpga64.html
+      * Tomasz Piórek and Agnieszka Bartkowicz: the original VBXE hardware,
+        on which the VBXE implementation by Wojciech Mostowski is based
+      * Avery Lee (Altirra) and laoo: GTIA palette data; the Altirra Hardware
+        Reference Manual was used for the VBXE implementation
+        https://www.virtualdub.org/altirra.html
+      * The cartridge type table used by the cartridge loader follows MiSTer's
+        Main_MiSTer (support/atari8bit/atari800.cpp) by the MiSTer
+        Development Team
+        https://github.com/MiSTer-devel/Main_MiSTer
 
-Other than that and my own work, REPO SHORT NAME uses:
-------------------------------------------------------
+Other than that and my own work, Mega800 uses:
+----------------------------------------------
 
-DO NOT FORGET TO CREDIT EVERYTHING YOU USE FROM OTHER PEOPLE HERE
-THE FOLLOWING LIST NEEDS ALWAYS TO BE PART OF YOUR LIST:
-  
   * MiSTer2MEGA65 by The MiSTer2MEGA65 Development Team
     https://github.com/sy2002/MiSTer2MEGA65
 
@@ -69,3 +88,4 @@ THE FOLLOWING LIST NEEDS ALWAYS TO BE PART OF YOUR LIST:
 
   * PSF font to C include file converter psftools-1.1.1 by John Elliott
     https://www.seasip.info/Unix/PSF/
+
