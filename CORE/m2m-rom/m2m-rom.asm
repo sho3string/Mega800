@@ -90,19 +90,31 @@ FILTER_FILES    INCRB
                 RBRA    _FFILES_RET_0, Z
 
                 ; ------------------------------------------------
-                ; Disk image browser: .ATR and .CAS
+                ; Disk image browser: Drive A -> .ATR, Cassette -> .CAS
                 ; ------------------------------------------------
                 CMP     CTX_MOUNT_DISKIMG, R10
                 RBRA    _FFILES_LOADROM, !Z
 
-                MOVE    ATARI_ATRFILE, R9
+                ; The Shell stores the caller in FB_LASTCALLER before it
+                ; opens the browser: high byte = vdrive number, low byte =
+                ; mode (0 = vdrive). vdrive 0 = Drive A, 1 = Cassette (the
+                ; order of the mount items in config.vhd).
+                MOVE    FB_LASTCALLER, R9
+                MOVE    @R9, R9
+                SWAP    R9, R9
+                AND     0x00FF, R9
+                CMP     1, R9                   ; Cassette?
+                RBRA    _FFILES_ATR, !Z         ; no: Drive A
+
+                MOVE    ATARI_CASFILE, R9       ; Cassette: only .CAS
                 RSUB    M2M$CHK_EXT, 1
                 RBRA    _FFILES_RET_0, C
+                MOVE    1, R8
+                RBRA    _FFILES_RET, 1
 
-                MOVE    ATARI_CASFILE, R9
+_FFILES_ATR     MOVE    ATARI_ATRFILE, R9       ; Drive A: only .ATR
                 RSUB    M2M$CHK_EXT, 1
                 RBRA    _FFILES_RET_0, C
-
                 MOVE    1, R8
                 RBRA    _FFILES_RET, 1
 

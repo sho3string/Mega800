@@ -76,7 +76,7 @@ type WHS_RECORD_ARRAY_TYPE is array (0 to WHS_RECORDS - 1) of WHS_RECORD_TYPE;
 
 constant SCR_WELCOME : string :=
 
-    "\n Mega 800 Core Alpha V2.0\n" &
+    "\n Mega 800 Core Alpha V3.0\n" &
    " by Muse\n\n" &
    " Powered by MiSTer2MEGA65 v2.1.0\n" &
    " by sy2002 and MJoergen\n\n\n" &
@@ -256,7 +256,7 @@ constant SEL_CORENAME      : std_logic_vector(15 downto 0) := x"0200";
 
 -- Currently this is only used in the debug console. Use the welcome screen and the
 -- help system to display the name and version of your core to the end user
-constant CORENAME          : string := "Mega800 Alpha V2.0";
+constant CORENAME          : string := "Mega800 Alpha V3.0";
 
 --------------------------------------------------------------------------------------------------------------------
 -- "Help" menu / Options menu  (Selectors 0x0300 .. 0x0312): DO NOT TOUCH
@@ -328,7 +328,7 @@ constant OPTM_DX           : natural := 23;
 constant OPTM_DY           : natural := 26;
 
 constant OPTM_ITEMS : string :=
-   " Mega 800 Alpha V2.0\n" &
+   " Mega 800 Alpha V3.0\n" &
    "\n" &
    " Drive A:%s\n" &
    " Cassette:%s\n" &
@@ -439,7 +439,7 @@ type OPTM_GTYPE is array (0 to OPTM_SIZE - 1) of integer range 0 to 2**OPTM_GTC-
 -- where are separator lines? which items should be selected by default?
 -- make sure that you have exactly the same amount of entries here than in OPTM_ITEMS and defined by OPTM_SIZE
 constant OPTM_GROUPS : OPTM_GTYPE := (
-                                       OPTM_G_TEXT + OPTM_G_HEADLINE,                         -- Mega 800 Alpha V2.0
+                                       OPTM_G_TEXT + OPTM_G_HEADLINE,                         -- Mega 800 Alpha V3.0
                                        OPTM_G_LINE,
                                        OPTM_G_Drive_A + OPTM_G_MOUNT_DRV + OPTM_G_START,      -- Drive A:%s
                                        OPTM_G_CAS + OPTM_G_MOUNT_DRV,                         -- Cassette:%s
